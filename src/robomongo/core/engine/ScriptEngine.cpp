@@ -159,7 +159,9 @@ namespace Robomongo
 
         MongoshSession::RunOutcome outcome = _session.run(
             sessionArgs(), originalScript, _currentDbName,
-            isShellHelper(originalScript), _timeoutSec);
+            isShellHelper(originalScript) ? MongoshSession::Mode::Helper
+                                          : MongoshSession::Mode::UserScript,
+            _timeoutSec);
 
         const qint64 elapsed = timer.elapsed();
 
@@ -237,7 +239,7 @@ namespace Robomongo
 
         MongoshSession::RunOutcome outcome = _session.run(
             sessionArgs(), script, dbName.empty() ? _currentDbName : dbName,
-            false /*isHelper*/, _timeoutSec);
+            MongoshSession::Mode::Internal, _timeoutSec);
 
         if (outcome.sessionError)
             throw std::runtime_error(outcome.sessionErrorMessage);
@@ -300,7 +302,7 @@ namespace Robomongo
             if (!_collectionCacheValid && _initialized) {
                 MongoshSession::RunOutcome res = _session.run(
                     sessionArgs(), "db.getCollectionNames()", _currentDbName,
-                    false /*isHelper*/, 5);
+                    MongoshSession::Mode::Internal, 5);
                 if (res.ok && res.hasResult && res.result.isArray()) {
                     _cachedCollectionNames.clear();
                     mongo::BSONObjIterator it(res.result);

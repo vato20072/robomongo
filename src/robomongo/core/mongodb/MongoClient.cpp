@@ -112,7 +112,8 @@ namespace Robomongo
     std::vector<std::string> MongoClient::getDatabaseNames() const
     {
         mongo::BSONObj result = eval(
-            "db.adminCommand({listDatabases: 1, nameOnly: true}).databases.map(d => d.name)");
+            "(async () => (await db.adminCommand({listDatabases: 1, nameOnly: true}))"
+            ".databases.map(d => d.name))()");
 
         std::vector<std::string> names;
         mongo::BSONObjIterator it(result);
@@ -140,14 +141,15 @@ namespace Robomongo
 
     std::string MongoClient::dbVersionStr() const
     {
-        return eval("({v: db.version()})").getStringField("v");
+        return eval("(async () => ({v: await db.version()}))()").getStringField("v");
     }
 
     std::string MongoClient::getStorageEngineType() const
     {
         return eval(
-            "({e: (() => { try { return db.serverStatus().storageEngine.name } "
-            "catch (err) { return '' } })()})").getStringField("e");
+            "(async () => { try { const s = await db.serverStatus(); "
+            "return {e: s.storageEngine.name}; } catch (err) { return {e: ''}; } })()")
+            .getStringField("e");
     }
 
     std::vector<MongoUser> MongoClient::getUsers(const std::string &dbName)
@@ -207,7 +209,9 @@ namespace Robomongo
 
     std::vector<MongoFunction> MongoClient::getFunctions(const std::string &dbName) const
     {
-        mongo::BSONObj result = eval(coll(dbName, "system.js") + ".find().toArray()");
+        mongo::BSONObj result = eval(
+            "(async () => { const c = await " + coll(dbName, "system.js") + ".find(); "
+            "return await c.toArray(); })()");
 
         std::vector<MongoFunction> functions;
         mongo::BSONObjIterator it(result);
@@ -264,13 +268,13 @@ namespace Robomongo
     {
         // No rename command exists: re-create the index under the new name
         eval(
-            "(() => {"
+            "(async () => {"
             "  const c = " + coll(collection.ns()) + ";"
-            "  const idx = c.getIndexes().find(i => i.name === " + js(oldIndexName) + ");"
+            "  const idx = (await c.getIndexes()).find(i => i.name === " + js(oldIndexName) + ");"
             "  if (!idx) throw new Error('Index not found: ' + " + js(oldIndexName) + ");"
             "  const {v, key, name, ns, ...options} = idx;"
-            "  c.dropIndex(" + js(oldIndexName) + ");"
-            "  c.createIndex(key, {...options, name: " + js(newIndexName) + "});"
+            "  await c.dropIndex(" + js(oldIndexName) + ");"
+            "  await c.createIndex(key, {...options, name: " + js(newIndexName) + "});"
             "  return {ok: 1};"
             "})()");
     }
@@ -310,12 +314,12 @@ namespace Robomongo
          * databases are not listed by the server.
          */
         eval(
-            "(() => {"
+            "(async () => {"
             "  const d = db.getSiblingDB(" + js(dbName) + ");"
-            "  if (d.getCollectionNames().includes('temp'))"
+            "  if ((await d.getCollectionNames()).includes('temp'))"
             "    throw new Error(" + js(dbName + ".temp already exists.") + ");"
-            "  d.getCollection('temp').insertOne({_id: 'temp'});"
-            "  d.getCollection('temp').drop();"
+            "  await d.getCollection('temp').insertOne({_id: 'temp'});"
+            "  await d.getCollection('temp').drop();"
             "  return {ok: 1};"
             "})()");
     }
@@ -366,12 +370,15 @@ namespace Robomongo
     {
         // Server-side copy via aggregation $out (the old implementation
         // looped documents through the embedded driver client-side)
-        eval(coll(ns) + ".aggregate([{$match: {}}, {$out: " + js(newCollectionName) + "}]).toArray()");
+        eval(
+            "(async () => { const c = await " + coll(ns) + ".aggregate([{$match: {}}, {$out: " +
+            js(newCollectionName) + "}]); return await c.toArray(); })()");
     }
 
     void MongoClient::dropCollection(const MongoNamespace &ns)
     {
-        mongo::BSONObj result = eval("({dropped: " + coll(ns) + ".drop()})");
+        mongo::BSONObj result = eval(
+            "(async () => ({dropped: await " + coll(ns) + ".drop()}))()");
         if (!result.getField("dropped").trueValue())
             throw std::runtime_error("Unable to drop collection " + ns.toString());
     }
@@ -429,15 +436,21 @@ namespace Robomongo
             }
         }
 
-        std::string script =
-            coll(ns) + ".find(" + ejson(filter) + ", " + ejson(info._fields) + ")";
+        // Options are passed as find()'s third argument: cursor methods
+        // (.limit/.skip/.sort) are async-rewriter proxies that cannot be
+        // chained inside the session's eval() context
+        mongo::BSONObjBuilder options;
         if (!orderBy.isEmpty())
-            script += ".sort(" + ejson(orderBy) + ")";
+            options.append("sort", orderBy);
         if (info._skip > 0)
-            script += ".skip(" + std::to_string(info._skip) + ")";
+            options.append("skip", info._skip);
         if (info._limit > 0)
-            script += ".limit(" + std::to_string(info._limit) + ")";
-        script += ".toArray()";
+            options.append("limit", info._limit);
+
+        std::string script =
+            "(async () => { const c = await " + coll(ns) + ".find(" + ejson(filter) + ", " +
+            ejson(info._fields) + ", " + ejson(options.obj()) + "); "
+            "return await c.toArray(); })()";
 
         mongo::BSONObj result = eval(script, ns.databaseName());
 

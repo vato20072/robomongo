@@ -804,7 +804,7 @@ namespace Robomongo
 
         try {
             mongo::BSONObj status = _scriptEngine->evalCommand(
-                "(() => { const s = rs.status(); return { set: s.set, "
+                "(async () => { const s = await rs.status(); return { set: s.set, "
                 "members: (s.members || []).map(m => ({ name: m.name, "
                 "health: m.health === 1, primary: m.stateStr === 'PRIMARY' })) }; })()",
                 getAuthBase());

@@ -6,6 +6,7 @@
 //   mongosh <uri> --quiet --norc --json=canonical --eval <script>
 // and parses stdout into print-output plus a structured EJSON result.
 
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QString>
 #include <QStringList>
@@ -113,13 +114,35 @@ namespace Robomongo
             bool hasMeta = false;
         };
 
+        enum class Mode
+        {
+            /**
+             * Internal scripts (MongoClient/autocomplete): evaluated with
+             * eval() inside the envelope function - no mongosh async
+             * rewriting, so scripts must use explicit async/await for any
+             * chained shell-API access. Thrown errors are captured into
+             * the envelope (surfaced as C++ exceptions).
+             */
+            Internal,
+
+            /**
+             * User shell-tab scripts: sent as raw REPL input, so mongosh's
+             * async rewriting applies (chained calls like
+             * db.runCommand(...).ok behave exactly like interactive
+             * mongosh). Runtime errors print as REPL text output.
+             */
+            UserScript,
+
+            /** REPL helper lines (use/show/...) sent verbatim */
+            Helper
+        };
+
         /**
          * Runs a script in the session (starting/restarting the process as
-         * needed). dbName switches the session's current database first;
-         * isHelper sends the script as a raw REPL line (use/show/...).
+         * needed). dbName switches the session's current database first.
          */
         RunOutcome run(const QStringList &connArgs, const std::string &script,
-                       const std::string &dbName, bool isHelper, int timeoutSec);
+                       const std::string &dbName, Mode mode, int timeoutSec);
 
         /** Kills the session process; the next run() starts a fresh one. */
         void interrupt();
@@ -127,6 +150,8 @@ namespace Robomongo
 
     private:
         bool ensureStarted(const QStringList &connArgs, std::string *error);
+        void readEnvelope(const std::string &id, int effectiveSec,
+                          QElapsedTimer &timer, RunOutcome &outcome);
 
         std::unique_ptr<QProcess> _process;
         QStringList _connArgs;
