@@ -101,8 +101,31 @@ namespace Robomongo
                     this->onExpandRecursive();
                 break;
             case Qt::Key_Left:
-                if (event->modifiers() & Qt::AltModifier)
+                if (event->modifiers() & Qt::AltModifier) {
                     this->onCollapseRecursive();
+                    break;
+                }
+                // Plain Left: collapse the current node if it is expanded,
+                // otherwise step up to the nearest parent (repeated presses
+                // collapse the ancestors one by one)
+                {
+                    QModelIndex current = currentIndex();
+                    if (current.isValid()) {
+                        QModelIndex const node = current.sibling(current.row(), 0);
+                        if (model()->hasChildren(node) && isExpanded(node)) {
+                            collapse(node);
+                            event->accept();
+                            return;
+                        }
+                        QModelIndex const parent = node.parent();
+                        if (parent.isValid()) {
+                            setCurrentIndex(parent);
+                            scrollTo(parent);
+                            event->accept();
+                            return;
+                        }
+                    }
+                }
                 break;
         }
 
