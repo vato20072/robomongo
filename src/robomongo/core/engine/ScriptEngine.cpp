@@ -2,7 +2,9 @@
 
 #include <QElapsedTimer>
 
+#include <cctype>
 #include <cstring>
+#include <sstream>
 
 #include "robomongo/core/domain/MongoDocument.h"
 #include "robomongo/core/settings/ConnectionSettings.h"
@@ -83,6 +85,60 @@ namespace
   });
 })();
 )ROBO";
+}
+
+namespace
+{
+    // Maximum documents materialized from a cursor in the shell result pane
+    // (mongosh --json cannot serialize a live cursor, and toArray() on a huge
+    // collection would exhaust memory). Robo's table view uses its own paged
+    // query path; this only bounds ad-hoc find()s typed in a shell tab.
+    constexpr int kShellCursorLimit = 1000;
+
+    /** True if the script is a mongosh REPL helper (not plain JavaScript) */
+    bool isShellHelper(const std::string &script)
+    {
+        size_t i = 0;
+        while (i < script.size() && std::isspace(static_cast<unsigned char>(script[i])))
+            ++i;
+        const std::string rest = script.substr(i);
+        auto startsWith = [&](const char *kw) {
+            return rest.rfind(kw, 0) == 0;
+        };
+        return startsWith("use ") || startsWith("show ") || startsWith("set ") ||
+               rest == "it" || rest == "exit" || rest == "quit" || rest == "cls" ||
+               rest == "help" || startsWith("help ");
+    }
+
+    /**
+     * Wraps a user shell script so mongosh --json can serialize its result:
+     * evaluates it, awaits promises (async driver ops), and materializes
+     * cursors into a bounded array of documents. Shell helpers (use/show/...)
+     * are passed through unchanged since they are not valid JavaScript.
+     */
+    std::string wrapUserScript(const std::string &script)
+    {
+        if (isShellHelper(script))
+            return script;
+
+        // The script is embedded as a JS string and run with eval() so the
+        // completion value of its last expression is captured. eval() does
+        // not get mongosh's implicit-await transform, so we await explicitly.
+        std::ostringstream ss;
+        ss << "(async () => {"
+              "  let __robo_v = eval(\"" << mongo::str::escape(script) << "\");"
+              "  if (__robo_v && typeof __robo_v.then === 'function') __robo_v = await __robo_v;"
+              "  if (__robo_v && typeof __robo_v.toArray === 'function'"
+              "      && typeof __robo_v.hasNext === 'function') {"
+              "    const __robo_docs = [];"
+              "    while (__robo_docs.length < " << kShellCursorLimit
+           << "        && await __robo_v.hasNext()) __robo_docs.push(await __robo_v.next());"
+              "    __robo_v = __robo_docs;"
+              "  }"
+              "  return __robo_v;"
+              "})()";
+        return ss.str();
+    }
 }
 
 namespace Robomongo
@@ -200,7 +256,7 @@ namespace Robomongo
         timer.start();
 
         MongoshExecutor::EvalResult evalResult =
-            _executor.eval(connArgs, {kPrelude, originalScript}, _timeoutSec);
+            _executor.eval(connArgs, {kPrelude, wrapUserScript(originalScript)}, _timeoutSec);
 
         const qint64 elapsed = timer.elapsed();
 

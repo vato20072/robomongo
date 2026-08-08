@@ -7,6 +7,10 @@
 #include <QStandardPaths>
 #include <QUrl>
 
+#include <QDateTime>
+#include <QFile>
+#include <QTextStream>
+
 #include "robomongo/core/settings/ConnectionSettings.h"
 #include "robomongo/core/settings/CredentialSettings.h"
 #include "robomongo/core/settings/ReplicaSetSettings.h"
@@ -14,6 +18,65 @@
 
 namespace Robomongo
 {
+    namespace
+    {
+        // Hard ceiling applied when no positive shell timeout is configured,
+        // so a stalled mongosh cannot hang a worker thread indefinitely.
+        constexpr int kNoTimeoutCeilingSec = 120;
+
+        bool debugLoggingEnabled()
+        {
+            static const bool enabled =
+                !qEnvironmentVariableIsEmpty("ROBO_MONGOSH_DEBUG");
+            return enabled;
+        }
+
+        void writeDebug(const QString &line)
+        {
+            if (!debugLoggingEnabled())
+                return;
+            QFile f(QDir(QDir::tempPath()).filePath("robo-mongosh.log"));
+            if (f.open(QIODevice::Append | QIODevice::Text)) {
+                QTextStream(&f) << QDateTime::currentDateTime().toString(Qt::ISODate)
+                                << " " << line << "\n";
+            }
+        }
+
+        // Redacts the password that follows -p / --password so it never
+        // reaches the log file.
+        QStringList redactArgs(const QStringList &args)
+        {
+            QStringList out = args;
+            for (int i = 0; i < out.size() - 1; ++i)
+                if (out[i] == "-p" || out[i] == "--password")
+                    out[i + 1] = "***";
+            return out;
+        }
+
+        void logInvocation(const QString &binary, const QStringList &args)
+        {
+            writeDebug("EXEC " + binary + " " + redactArgs(args).join(" "));
+        }
+
+        void logResult(const MongoshExecutor::EvalResult &r)
+        {
+            if (!debugLoggingEnabled())
+                return;
+            QString summary = QString("DONE exit=%1 timedOut=%2 failedToStart=%3 "
+                                      "hasResult=%4 isError=%5")
+                                  .arg(r.exitCode).arg(r.timedOut).arg(r.failedToStart)
+                                  .arg(r.output.hasResult).arg(r.output.isError);
+            writeDebug(summary);
+            if (!r.output.errorMessage.empty())
+                writeDebug("  errorMessage: " + QString::fromStdString(r.output.errorMessage));
+            if (!r.errorOutput.empty())
+                writeDebug("  stderr: " +
+                           QString::fromStdString(r.errorOutput.substr(0, 2000)));
+            if (!r.output.text.empty())
+                writeDebug("  stdout-text: " +
+                           QString::fromStdString(r.output.text.substr(0, 500)));
+        }
+    }
     QString MongoshExecutor::findMongoshBinary()
     {
 #ifdef Q_OS_WIN
@@ -158,6 +221,8 @@ namespace Robomongo
         env.insert("NO_COLOR", "1");
         process.setProcessEnvironment(env);
 
+        logInvocation(binary, args);
+
         _activeProcess.store(&process);
         process.start(binary, args);
 
@@ -166,11 +231,22 @@ namespace Robomongo
             result.failedToStart = true;
             result.errorOutput = "Failed to start mongosh: " +
                                  process.errorString().toStdString();
+            logResult(result);
             return result;
         }
 
-        const int timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : -1;
-        if (!process.waitForFinished(timeoutMs)) {
+        // Close mongosh's stdin so any interactive prompt (password, OIDC
+        // device-auth, confirmation) gets EOF and fails fast, instead of
+        // blocking the worker thread forever waiting on input that never
+        // comes (QProcess keeps the write channel open otherwise).
+        process.closeWriteChannel();
+
+        // Never wait forever. timeoutSec<=0 means "no user shell timeout",
+        // but we still cap at a hard ceiling so a stalled mongosh (network
+        // black hole, unexpected prompt) surfaces as an error rather than
+        // an indefinite spinner.
+        const int effectiveSec = timeoutSec > 0 ? timeoutSec : kNoTimeoutCeilingSec;
+        if (!process.waitForFinished(effectiveSec * 1000)) {
             result.timedOut = true;
             process.kill();
             process.waitForFinished(5000);
@@ -187,6 +263,7 @@ namespace Robomongo
             result.output.text = "Script execution interrupted.";
         }
 
+        logResult(result);
         return result;
     }
 
