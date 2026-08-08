@@ -47,6 +47,10 @@ if(ROBO_WEBENGINE)
         set(ROBO_WEBENGINE OFF)
     endif()
 endif()
+# Fetch mongosh for bundling (before the MongoDB fork check, so it also
+# runs/downloads in environments where the 4.2 shell fork is not set up)
+include(RobomongoMongosh)
+
 find_package(MongoDB REQUIRED)
 find_package(OpenSSL REQUIRED)
 

@@ -100,11 +100,14 @@ bills; only worth it as a transition state (one or two releases).
   bundled `mongosh` process; parse EJSON output into Robo's
   `MongoDocument` model; wire cursor paging (`it`/`DBQuery.shellBatchSize`
   equivalents) and shell timeouts; port autocomplete.
-* **Phase 3 — packaging:** CMake step downloads/verifies the platform's
-  mongosh binary at build time; NSIS/dmg/tar scripts in `install/` bundle
-  it next to the executable (this replaces "embed it in the installer"
-  from the 4.2 era). Ship as the default engine, keep 4.2 as fallback
-  behind a setting.
+* **Phase 3 — packaging (groundwork done):** `cmake/RobomongoMongosh.cmake`
+  downloads the platform's official standalone mongosh at configure time
+  (version selected via `ROBO_MONGOSH_VERSION`, disable with
+  `-DROBO_BUNDLE_MONGOSH=OFF`) and the install/package steps bundle it
+  next to the executable — this replaces "embed it in the installer"
+  from the 4.2 era. Remaining: ship mongosh as the default engine once
+  Phase 2 lands, keep 4.2 as fallback behind a setting; include the
+  bundled binary in macOS codesigning.
 * **Phase 4 — retire the fork:** drop `FindMongoDB.cmake`, the object
   lists and the OpenSSL 1.1 pin; move minimum Qt to 5.15/Qt 6; produce
   native arm64 macOS builds.

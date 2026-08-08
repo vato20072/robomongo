@@ -71,6 +71,28 @@ Platform notes
   requires an x86_64 (Rosetta 2) toolchain, or waiting for the planned shell
   modernization — see [Mongo6Modernization.md](Mongo6Modernization.md).
 
+Bundled mongosh
+---------------
+
+As part of the [MongoDB 6.x+ modernization](Mongo6Modernization.md), the build
+downloads the official standalone `mongosh` distribution at configure time and
+bundles it next to the Robo 3T executable during `bin/install` / `bin/pack`
+(`cmake/RobomongoMongosh.cmake`).
+
+Pick the mongosh version per build — either via environment variable or CMake
+cache flag:
+
+```sh
+ROBO_MONGOSH_VERSION=2.8.3 devbox run configure   # env var wins over cache
+bin/configure release -DROBO_MONGOSH_VERSION=2.9.2
+bin/configure release -DROBO_BUNDLE_MONGOSH=OFF   # offline builds
+```
+
+Downloads are cached under `build/<type>/mongosh/` per version, so switching
+back and forth is cheap. The devbox shell also provides its own `mongosh` CLI
+(from nixpkgs, pinned in `devbox.json`) for interactive testing against
+servers — independent of the version being bundled.
+
 Housekeeping
 ------------
 

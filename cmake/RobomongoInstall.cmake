@@ -157,3 +157,12 @@ elseif(SYSTEM_WINDOWS)
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
     include(InstallRequiredSystemLibraries)
 endif()
+
+# Bundle mongosh (fetched by RobomongoMongosh.cmake) next to the executable,
+# so installers/packages ship it - the executor for MongoDB 6.x+ servers.
+if(ROBO_BUNDLE_MONGOSH AND MONGOSH_DIST_BIN_DIR)
+    install(
+        DIRECTORY   "${MONGOSH_DIST_BIN_DIR}/"
+        DESTINATION ${bin_dir}
+        USE_SOURCE_PERMISSIONS)
+endif()

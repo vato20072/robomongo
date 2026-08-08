@@ -119,6 +119,44 @@
       "last_modified": "2026-08-06T00:10:29Z",
       "resolved": "github:NixOS/nixpkgs/70ce234312134a463ba7728e94da2486a1d237ac?lastModified=1785975029&narHash=sha256-X44cn5rzytELc3NNoQsh0aLkjWA%2FQzPfc6HPQmsG3sU%3D"
     },
+    "mongosh@latest": {
+      "last_modified": "2026-08-01T16:34:20Z",
+      "resolved": "github:NixOS/nixpkgs/a5cbcfe954791221bfffe2307f7d1a1bf61a871e#mongosh",
+      "source": "devbox-search",
+      "version": "2.9.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/igfk6v4cycl270srsk3jcsrh066y5kas-mongosh-2.9.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/igfk6v4cycl270srsk3jcsrh066y5kas-mongosh-2.9.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/34kvzyaj1zx093azka9lprzg77psq3yq-mongosh-2.9.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/34kvzyaj1zx093azka9lprzg77psq3yq-mongosh-2.9.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/58kvdrxx8hys982bckm7ll8g27896249-mongosh-2.9.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/58kvdrxx8hys982bckm7ll8g27896249-mongosh-2.9.2"
+        }
+      }
+    },
     "openssl_1_1@1.1.1w": {
       "last_modified": "2026-08-03T09:05:39Z",
       "resolved": "github:NixOS/nixpkgs/104240a772428cc2e20d8fd86c9ddbb886bbaff2#openssl_1_1",
