@@ -111,6 +111,12 @@ See [docs/DevboxEnvironment.md](docs/DevboxEnvironment.md) for details, and
 [docs/Mongo6Modernization.md](docs/Mongo6Modernization.md) for the analysis and
 roadmap of moving from the embedded MongoDB 4.2 shell to `mongosh` (MongoDB 6.x+).
 
+CI: the [Build installers](.github/workflows/build-installers.yml) GitHub Actions
+workflow produces a macOS `.dmg` and a Windows NSIS installer with mongosh
+bundled (version selectable via the `mongosh_version` dispatch input; mongosh
+2.x supports MongoDB Server 6.0+). The MongoDB 4.2 fork build tree is cached
+between runs.
+
 Contribute!
 ===========
 

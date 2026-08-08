@@ -1,0 +1,248 @@
+# Builds installable images (macOS .dmg, Windows NSIS .exe) with mongosh
+# bundled next to the executable (see cmake/RobomongoMongosh.cmake).
+#
+# The bundled mongosh version is controlled by ROBO_MONGOSH_VERSION below
+# (or the workflow_dispatch input). Note: mongosh versions do not mirror
+# MongoDB server versions - mongosh 2.x is the current shell and supports
+# MongoDB Server 6.0 and newer.
+#
+# The heavy part is compiling the Robo 3T Shell (patched MongoDB 4.2 fork,
+# x86_64 only) - its build tree is cached, so only the first run on a new
+# fork revision pays the multi-hour compile cost.
+
+name: Build installers
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
+    inputs:
+      mongosh_version:
+        description: "mongosh version to bundle (2.x supports MongoDB 6.0+)"
+        required: false
+        default: "2.9.2"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROBO_MONGOSH_VERSION: ${{ github.event.inputs.mongosh_version || '2.9.2' }}
+  SHELL_REPO: paralect/robomongo-shell
+  SHELL_BRANCH: roboshell-v4.2
+  OPENSSL_VERSION: 1.1.1w
+
+jobs:
+  macos:
+    # Intel runner required: the MongoDB 4.2 fork only supports x86_64
+    # (mozjs-60 platform headers). macos-15-intel is GitHub's last Intel
+    # image (supported into 2027).
+    runs-on: macos-15-intel
+    timeout-minutes: 360
+    steps:
+      - name: Checkout Robo 3T
+        uses: actions/checkout@v4
+        with:
+          path: robo
+
+      - name: Checkout Robo 3T Shell (MongoDB 4.2 fork)
+        uses: actions/checkout@v4
+        with:
+          repository: paralect/robomongo-shell
+          ref: roboshell-v4.2
+          path: robo-shell
+
+      - name: Get shell revision
+        id: shell-rev
+        run: echo "sha=$(git -C robo-shell rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Select oldest available Xcode
+        # MongoDB 4.2-era sources compile best with the oldest toolchain
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | sort -V | head -1)
+          echo "Selecting $XCODE"
+          sudo xcode-select -s "$XCODE"
+          clang --version
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.7"
+
+      - name: Install SCons and MongoDB build requirements
+        run: |
+          pip install scons==3.1.2
+          pip install -r robo-shell/etc/pip/compile-requirements.txt || \
+            pip install Cheetah3 psutil PyYAML typing requests regex
+
+      - name: Install Qt 5.12.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "5.12.8"
+          arch: clang_64
+          modules: qtwebengine
+          cache: true
+
+      - name: Cache OpenSSL
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: openssl-${{ env.OPENSSL_VERSION }}
+          key: openssl-${{ env.OPENSSL_VERSION }}-${{ runner.os }}-x64
+
+      - name: Build OpenSSL
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        run: |
+          curl -sLO "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
+          tar -xf "openssl-${OPENSSL_VERSION}.tar.gz"
+          cd "openssl-${OPENSSL_VERSION}"
+          ./Configure darwin64-x86_64-cc shared no-ssl2 no-ssl3 no-comp -mmacosx-version-min=10.14
+          make -j"$(sysctl -n hw.ncpu)"
+          # rpath fixups + lib/ layout expected by Robo's FindOpenSSL
+          install_name_tool -id "@rpath/lib/libssl.1.1.dylib" libssl.1.1.dylib
+          install_name_tool -change /usr/local/lib/libcrypto.1.1.dylib \
+            @rpath/lib/libcrypto.1.1.dylib libssl.1.1.dylib
+          install_name_tool -id "@rpath/lib/libcrypto.1.1.dylib" libcrypto.1.1.dylib
+          mkdir -p lib && cp lib*.dylib lib/
+
+      - name: Cache shell build
+        id: cache-shell
+        uses: actions/cache@v4
+        with:
+          path: robo-shell/build/opt
+          key: shell-${{ runner.os }}-x64-${{ steps.shell-rev.outputs.sha }}
+
+      - name: Build Robo 3T Shell
+        if: steps.cache-shell.outputs.cache-hit != 'true'
+        working-directory: robo-shell
+        run: bin/build
+
+      - name: Configure, build and package Robo 3T
+        working-directory: robo
+        run: |
+          export ROBOMONGO_CMAKE_PREFIX_PATH="$QT_ROOT_DIR;$GITHUB_WORKSPACE/robo-shell;$GITHUB_WORKSPACE/openssl-${OPENSSL_VERSION}"
+          bin/configure
+          bin/build
+          bin/pack
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: robo3t-macos-x86_64-mongosh-${{ env.ROBO_MONGOSH_VERSION }}
+          path: robo/build/release/package/*.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Checkout Robo 3T
+        uses: actions/checkout@v4
+        with:
+          path: robo
+
+      - name: Checkout Robo 3T Shell (MongoDB 4.2 fork)
+        uses: actions/checkout@v4
+        with:
+          repository: paralect/robomongo-shell
+          ref: roboshell-v4.2
+          path: robo-shell
+
+      - name: Get shell revision
+        id: shell-rev
+        shell: bash
+        run: echo "sha=$(git -C robo-shell rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install VS2019 v141 toolset (VS2017 compiler)
+        # MongoDB 4.2 requires the VS2017-era toolchain; windows-2022 only
+        # ships VS2022, so install the v141 toolset via VS2019 Build Tools.
+        shell: pwsh
+        run: |
+          choco install visualstudio2019buildtools --no-progress -y --package-parameters `
+            "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+             --add Microsoft.VisualStudio.Component.VC.v141.x86.x64 `
+             --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --quiet --norestart"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.7"
+
+      - name: Install SCons and MongoDB build requirements
+        shell: bash
+        run: |
+          pip install scons==3.1.2
+          pip install -r robo-shell/etc/pip/compile-requirements.txt || \
+            pip install Cheetah3 psutil PyYAML typing requests regex
+
+      - name: Install Qt 5.12.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "5.12.8"
+          arch: win64_msvc2017_64
+          modules: qtwebengine
+          cache: true
+
+      - name: Install NASM (for OpenSSL)
+        run: choco install nasm --no-progress -y
+
+      - name: Cache OpenSSL
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: openssl-${{ env.OPENSSL_VERSION }}
+          key: openssl-${{ env.OPENSSL_VERSION }}-${{ runner.os }}-x64
+
+      - name: Build OpenSSL
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          curl -sLO "https://www.openssl.org/source/openssl-%OPENSSL_VERSION%.tar.gz"
+          tar -xf openssl-%OPENSSL_VERSION%.tar.gz
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=14.16
+          set PATH=C:\Program Files\NASM;%PATH%
+          cd openssl-%OPENSSL_VERSION%
+          perl Configure VC-WIN64A
+          nmake
+
+      - name: Cache shell build
+        id: cache-shell
+        uses: actions/cache@v4
+        with:
+          path: robo-shell/build/opt
+          key: shell-${{ runner.os }}-x64-${{ steps.shell-rev.outputs.sha }}
+
+      - name: Build Robo 3T Shell
+        if: steps.cache-shell.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: robo-shell
+        run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=14.16
+          call bin\build.bat
+
+      - name: Configure, build and package Robo 3T
+        shell: cmd
+        working-directory: robo
+        run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=14.16
+          set "ROBOMONGO_CMAKE_PREFIX_PATH=%QT_ROOT_DIR%;%GITHUB_WORKSPACE%\robo-shell;%GITHUB_WORKSPACE%\openssl-%OPENSSL_VERSION%"
+          set "ROBO_CMAKE_GENERATOR=Visual Studio 16 2019"
+          set "ROBO_CMAKE_PLATFORM=x64"
+          set "ROBO_CMAKE_TOOLSET=v141"
+          call bin\configure.bat
+          if errorlevel 1 exit /b 1
+          call bin\build.bat
+          if errorlevel 1 exit /b 1
+          call bin\pack.bat
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: robo3t-windows-x86_64-mongosh-${{ env.ROBO_MONGOSH_VERSION }}
+          path: |
+            robo/build/Release/package/*.exe
+            robo/build/Release/package/*.zip
+          if-no-files-found: error
