@@ -6,6 +6,7 @@
 #include <cstring>
 #include <sstream>
 
+#include "robomongo/bson/mongouri.h"
 #include "robomongo/core/domain/MongoDocument.h"
 #include "robomongo/core/settings/ConnectionSettings.h"
 #include "robomongo/core/settings/CredentialSettings.h"
@@ -108,6 +109,31 @@ namespace
         return startsWith("use ") || startsWith("show ") || startsWith("set ") ||
                rest == "it" || rest == "exit" || rest == "quit" || rest == "cls" ||
                rest == "help" || startsWith("help ");
+    }
+
+    /**
+     * Produces a credential-free display address "mongodb://host:port/db"
+     * for the shell tab header. mongosh reports its connection as a full
+     * URI including username/password and internal options; those must not
+     * be shown. Falls back to the raw string if it cannot be parsed.
+     */
+    std::string displayServer(const std::string &raw, const std::string &dbName)
+    {
+        auto statusWith = mongo::MongoURI::parse(raw);
+        if (!statusWith.isOK())
+            return raw;
+
+        const mongo::MongoURI &uri = statusWith.getValue();
+        std::string out = "mongodb://";
+        const auto &servers = uri.getServers();
+        for (size_t i = 0; i < servers.size(); ++i) {
+            if (i) out += ",";
+            out += servers[i].toString();
+        }
+        const std::string db = !dbName.empty() ? dbName : uri.getDatabase();
+        if (!db.empty())
+            out += "/" + db;
+        return out;
     }
 
     /**
@@ -314,11 +340,12 @@ namespace Robomongo
                                  meta.aggrInfo.isValid ? meta.aggrInfo : aggrInfo);
         }
 
-        const std::string server = meta.serverValid
+        const std::string rawServer = meta.serverValid
             ? meta.server
             : (_serverAddr.empty() ? _connection->getFullAddress() : _serverAddr);
+        const std::string server = displayServer(rawServer, _currentDbName);
 
-        return MongoShellExecResult(results, server, meta.serverValid || !server.empty(),
+        return MongoShellExecResult(results, server, meta.serverValid || !rawServer.empty(),
                                     _currentDbName, true, false);
     }
 
