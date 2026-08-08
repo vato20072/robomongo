@@ -1,6 +1,5 @@
 #include "robomongo/core/domain/MongoFunction.h"
 #include "robomongo/core/utils/BsonUtils.h"
-#include <mongo/client/dbclient_base.h>
 
 namespace Robomongo
 {
@@ -13,11 +12,8 @@ namespace Robomongo
     mongo::BSONObj MongoFunction::toBson() const
     {
         mongo::BSONObjBuilder builder;
-
-        mongo::BSONCode code = mongo::BSONCode(_code);
         builder.append("_id", _name);
-        builder.append("value", code);
-        mongo::BSONObj obj = builder.obj();
-        return obj;
+        builder.appendCode("value", _code);
+        return builder.obj();
     }
 }

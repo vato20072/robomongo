@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QMetaType>
 
+#include <iostream>
+
 #include "robomongo/core/AppRegistry.h"
 #include "robomongo/core/domain/App.h"
 #include "robomongo/core/EventBus.h"
@@ -41,7 +43,7 @@ namespace Robomongo
             return;
 
         // Make uniform log level strings e.g "Error: ", "Info: " etc...
-        auto logLevelStr = QString::fromStdString(level.toStringData().toString());
+        auto logLevelStr = QString::fromStdString(level.toString());
         if (!logLevelStr.isEmpty()) {
             logLevelStr = logLevelStr.toLower();
             logLevelStr[0] = logLevelStr[0].toUpper();

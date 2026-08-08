@@ -69,13 +69,13 @@ namespace
         if (!info._defaultLanguage.empty()) options.append("default_language", info._defaultLanguage);
         if (!info._languageOverride.empty()) options.append("language_override", info._languageOverride);
         if (!info._textWeights.empty()) {
-            mongo::BSONObj weights = mongo::Robomongo::fromjson(info._textWeights);
+            mongo::BSONObj weights = mongo::shelljson::fromjson(info._textWeights);
             if (!weights.isEmpty())
                 options.append("weights", weights);
         }
         if (info._ttl > 0) options.append("expireAfterSeconds", info._ttl);
 
-        mongo::BSONObj keys = mongo::Robomongo::fromjson(
+        mongo::BSONObj keys = mongo::shelljson::fromjson(
             info._keys.empty() ? "{}" : info._keys);
 
         return coll(info._collection.ns()) + ".createIndex(" + ejson(keys) + ", " +

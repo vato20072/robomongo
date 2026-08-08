@@ -22,7 +22,7 @@
 #include "robomongo/gui/editors/FindFrame.h"
 #include "robomongo/gui/editors/JSLexer.h"
 #include "robomongo/gui/editors/PlainJavaScriptEditor.h"
-#include "robomongo/shell/bson/json.h"
+#include "robomongo/bson/bson.h"
 
 namespace Robomongo
 {
@@ -433,9 +433,9 @@ namespace Robomongo
     bool CreateCollectionDialog::validate(JSONFrame* frame, mongo::BSONObj& bsonObj, bool silentOnSuccess /* = true */)
     {
         try {
-            bsonObj = mongo::Robomongo::fromjson(jsonText(frame).toStdString());
+            bsonObj = mongo::shelljson::fromjson(jsonText(frame).toStdString());
         }
-        catch (const mongo::Robomongo::ParseMsgAssertionException &ex) {
+        catch (const mongo::shelljson::ParseMsgAssertionException &ex) {
             // v0.9
             QString message = QtUtils::toQString(ex.reason());
             int offset = ex.offset();

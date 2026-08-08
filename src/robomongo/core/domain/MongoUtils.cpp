@@ -1,7 +1,6 @@
 #include "robomongo/core/domain/MongoUtils.h"
-#include <mongo/db/json.h>
-using namespace std;
-#include "mongo/util/md5.hpp"
+
+#include <QCryptographicHash>
 
 namespace Robomongo
 {
@@ -20,16 +19,12 @@ namespace Robomongo
 
         std::string buildPasswordHash(const std::string &username, const std::string &password)
         {
-            std::string sum = username + ":mongo:" + password;
-            const char * s = sum.c_str();
-
-            mongo::md5digest d;
-            md5_state_t st;
-            md5_init(&st);
-            md5_append( &st , (const md5_byte_t*)s , strlen( s ) );
-            md5_finish(&st, d);
-
-            return mongo::digestToString(d);
+            // Legacy MONGODB-CR digest: md5(username + ":mongo:" + password)
+            const std::string sum = username + ":mongo:" + password;
+            const QByteArray digest = QCryptographicHash::hash(
+                QByteArray(sum.data(), static_cast<int>(sum.size())),
+                QCryptographicHash::Md5);
+            return digest.toHex().toStdString();
         }
     }
 }

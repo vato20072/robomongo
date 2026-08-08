@@ -116,14 +116,21 @@ else()
   elseif(SYSTEM_LINUX)
     SET(EXT "so")
   endif()
+  # Libraries live at the OpenSSL root for source builds, under lib/ for
+  # installed layouts (e.g. Nix/devbox profiles, system packages)
+  if(EXISTS "${OpenSSL_DIR}/libssl.${EXT}")
+    set(OpenSSL_LIB_DIR "${OpenSSL_DIR}")
+  else()
+    set(OpenSSL_LIB_DIR "${OpenSSL_DIR}/lib")
+  endif()
   set_target_properties(ssl PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES   "${OpenSSL_DIR}/include"
-      IMPORTED_LOCATION               "${OpenSSL_DIR}/libssl.${EXT}"
+      IMPORTED_LOCATION               "${OpenSSL_LIB_DIR}/libssl.${EXT}"
   )
   set_target_properties(crypto PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES   "${OpenSSL_DIR}/include"
-      IMPORTED_LOCATION               "${OpenSSL_DIR}/libcrypto.${EXT}"
-  )  
+      IMPORTED_LOCATION               "${OpenSSL_LIB_DIR}/libcrypto.${EXT}"
+  )
 endif()
 
 # End of file

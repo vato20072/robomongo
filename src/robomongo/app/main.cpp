@@ -3,16 +3,6 @@
 
 #include <locale.h>
 
-// Header "mongo/util/net/sock" is needed for mongo::enableIPv6()
-// Header "mongo/platform/basic" is required by "sock.h" under Windows
-#include <mongo/platform/basic.h>
-#include <mongo/util/net/socket_utils.h>
-#include <mongo/base/initializer.h>
-#include <mongo/util/net/ssl_options.h>
-#include <mongo/db/service_context.h>
-#include <mongo/transport/transport_layer_asio.h>
-#include <mongo/shell/shell_options.h>
-#include <mongo/db/storage/storage_engine_init.h>
 
 #include "robomongo/core/AppRegistry.h"
 #include "robomongo/core/settings/SettingsManager.h"
@@ -33,30 +23,12 @@ int main(int argc, char *argv[], char** envp)
     envp = NULL;
 #endif
 
-    // Support for IPv6 is disabled by default. Enable it.
-    mongo::enableIPv6(true);
-
-    // Perform SSL-enabled mongo initialization
-    mongo::sslGlobalParams.sslMode.store(mongo::SSLParams::SSLMode_allowSSL);
+    // No embedded MongoDB runtime to initialize since the mongosh pivot -
+    // networking, TLS and shell execution live in the mongosh sidecar.
+    (void)envp;
 
     // Cross Platform High DPI support - Qt 5.7
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-
-    // Initialization routine for MongoDB shell
-    mongo::runGlobalInitializersOrDie(argc, argv, envp);
-    mongo::setGlobalServiceContext(mongo::ServiceContext::make());
-    // Todo from mongo repo: This should use a TransportLayerManager or TransportLayerFactory
-    auto serviceContext = mongo::getGlobalServiceContext();
-    mongo::transport::TransportLayerASIO::Options opts;
-    // When true, it breaks connection to localhost, github #1757
-    opts.enableIPv6 = mongo::shellGlobalParams.enableIPv6;
-    opts.mode = mongo::transport::TransportLayerASIO::Options::kEgress;
-    serviceContext->setTransportLayer(
-        std::make_unique<mongo::transport::TransportLayerASIO>(opts, nullptr)
-    );
-    auto tlPtr = serviceContext->getTransportLayer();
-    uassertStatusOK(tlPtr->setup());
-    uassertStatusOK(tlPtr->start());    
 
     // Initialize Qt application
     QApplication app(argc, argv);

@@ -218,15 +218,14 @@ namespace Robomongo
                 break;
             }
             case DBRef: {
-                mongo::OID *x = (mongo::OID *) (elem.valuestr() + elem.valuestrsize());
                 if ( format == TenGen )
                     s << "DBRef(";
                 else
                     s << "{ \"$ref\" : ";
-                s << '"' << elem.valuestr() << "\", ";
+                s << '"' << elem.dbrefNS() << "\", ";
                 if ( format != TenGen )
                     s << "\"$id\" : ";
-                s << '"' << *x << "\"";
+                s << '"' << elem.dbrefOID() << "\"";
                 if ( format == TenGen )
                     s << ')';
                 else
@@ -249,18 +248,17 @@ namespace Robomongo
                 }
                 break;
             case BinData: {
-                int len = *(int *)( elem.value() );
-                BinDataType type = BinDataType( *(char *)( (int *)( elem.value() ) + 1 ) );
+                BinDataType type = elem.binDataType();
 
                 if (type == mongo::bdtUUID || type == mongo::newUUID) {
                     s << HexUtils::formatUuid(elem, uuidEncoding);
                     break;
                 }
 
-                s << "{ \"$binary\" : \"";
-                char *start = ( char * )( elem.value() ) + sizeof( int ) + 1;
-                base64::encode( s , start , len );
-                s << "\", \"$type\" : \"" << hex;
+                int len = 0;
+                const char *data = elem.binData(len);
+                s << "{ \"$binary\" : \"" << base64::encode(data, len)
+                  << "\", \"$type\" : \"" << hex;
                 s.width( 2 );
                 s.fill( '0' );
                 s << type << dec;

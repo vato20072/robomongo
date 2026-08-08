@@ -1,6 +1,70 @@
 {
   "lockfile_version": "1",
   "packages": {
+    "boost@latest": {
+      "last_modified": "2026-08-01T16:34:20Z",
+      "resolved": "github:NixOS/nixpkgs/a5cbcfe954791221bfffe2307f7d1a1bf61a871e#boost",
+      "source": "devbox-search",
+      "version": "1.89.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/r8jknqcjy4hv2xml1w1z1h7cjglly3mk-boost-1.89.0",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/yrjg9inlmzbb6zhiybcg93dpy47z7fks-boost-1.89.0-dev"
+            }
+          ],
+          "store_path": "/nix/store/r8jknqcjy4hv2xml1w1z1h7cjglly3mk-boost-1.89.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/7zyf7gnfz35zmdifcig29rllf3l1nnx8-boost-1.89.0",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/0wgwrs1566zih3fghqdcl4kxphna4pq5-boost-1.89.0-dev"
+            }
+          ],
+          "store_path": "/nix/store/7zyf7gnfz35zmdifcig29rllf3l1nnx8-boost-1.89.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/98pnjxgc4ds5wsfsz3fbf4np1zr78nnf-boost-1.89.0",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/jb1g0k3q8rs5znhyrri3iz6s0235csis-boost-1.89.0-dev"
+            }
+          ],
+          "store_path": "/nix/store/98pnjxgc4ds5wsfsz3fbf4np1zr78nnf-boost-1.89.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8zgdzwmrfrrcpsvfrqz557sc8vf85qxk-boost-1.89.0",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/hl9mnablabykyx4q5dw7a9cdp2m1pclh-boost-1.89.0-dev"
+            }
+          ],
+          "store_path": "/nix/store/8zgdzwmrfrrcpsvfrqz557sc8vf85qxk-boost-1.89.0"
+        }
+      }
+    },
     "cmake@3.31.7": {
       "last_modified": "2025-09-18T16:33:27Z",
       "resolved": "github:NixOS/nixpkgs/f4b140d5b253f5e2a1ff4e5506edbf8267724bde#cmake",

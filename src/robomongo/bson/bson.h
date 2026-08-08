@@ -158,6 +158,7 @@ namespace mongo {
 
         bool isNull() const { return type() == jstNULL; }
         bool isUndefined() const { return type() == Undefined; }
+        bool isABSONObj() const { return type() == Object || type() == mongo::Array; }
 
         // --- string-ish ---
         std::string String() const;
@@ -447,6 +448,12 @@ namespace mongo {
         int port() const { return _port; }
         bool empty() const { return _host.empty(); }
         std::string toString() const;
+        bool operator<(const HostAndPort &o) const {
+            return _host != o._host ? _host < o._host : _port < o._port;
+        }
+        bool operator==(const HostAndPort &o) const {
+            return _host == o._host && _port == o._port;
+        }
     private:
         std::string _host;
         int _port = 27017;
@@ -464,8 +471,35 @@ namespace mongo {
         BSONObj _obj;
     };
 
-    /** The 4.2 fork exposed a relaxed parser as mongo::Robomongo::fromjson */
-    namespace Robomongo {
-        inline BSONObj fromjson(const std::string &json) { return mongo::fromjson(json); }
+    /**
+     * The 4.2 fork exposed a relaxed shell-notation parser as
+     * mongo::shelljson::fromjson - used by the document/collection editors.
+     * Accepts unquoted keys, single quotes and shell constructors
+     * (ObjectId(...), ISODate(...), NumberLong(...), ...) in addition to
+     * strict/extended JSON.
+     */
+    namespace shelljson {
+
+        class ParseMsgAssertionException : public std::exception {
+        public:
+            ParseMsgAssertionException(const std::string &reason, int offset)
+                : _reason(reason), _offset(offset) {}
+            const char *what() const noexcept override { return _reason.c_str(); }
+            const std::string &reason() const { return _reason; }
+            int offset() const { return _offset; }
+        private:
+            std::string _reason;
+            int _offset;
+        };
+
+        /** Parses a single document; throws ParseMsgAssertionException */
+        BSONObj fromjson(const std::string &json);
+
+        /**
+         * Parses the first document found at `json`, storing the number of
+         * consumed characters (including trailing whitespace) in *len -
+         * used to parse a concatenation of documents.
+         */
+        BSONObj fromjson(const char *json, int *len);
     }
 }

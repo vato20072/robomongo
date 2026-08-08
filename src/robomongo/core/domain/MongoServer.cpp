@@ -435,7 +435,7 @@ namespace Robomongo {
 
             if (event->error().errorCode() == EventError::ErrorCode::ServerHasDifferentMembers) {
                 ss << "Cannot connect to replica set \"" << _connSettings->connectionName() << "\"" << server
-                   << ". \n\nA primary with different host name [" << event->replicaSet.primary << 
+                   << ". \n\nA primary with different host name [" << event->replicaSet.primary.toString() <<
                    "] found in server side. "
                    "Please double check if same host names and ports are used as in server's replica set"
                    " configuration. \nIf same set name is used for different replica sets, this configuration"

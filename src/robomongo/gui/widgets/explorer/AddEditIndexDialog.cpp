@@ -21,7 +21,7 @@
 #include "robomongo/gui/GuiRegistry.h"
 #include "robomongo/core/domain/MongoCollection.h"
 #include "robomongo/core/utils/QtUtils.h"
-#include <robomongo/shell/bson/json.h>
+#include "robomongo/bson/bson.h"
 
 namespace
 {
@@ -30,7 +30,7 @@ namespace
         bool result = false;
         if (!text.isEmpty()) {
             try {
-                mongo::Robomongo::fromjson(text.toUtf8());
+                mongo::shelljson::fromjson(text.toUtf8().toStdString());
                 result = true;
             }
             catch (const std::exception &) {

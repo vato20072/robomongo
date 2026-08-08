@@ -4,6 +4,8 @@
 #include <QVariant>
 #include <QVariantMap>
 
+#include <set>
+
 #include <mongo/util/net/hostandport.h>
 #include <mongo/client/mongo_uri.h>
 

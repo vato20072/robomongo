@@ -15,14 +15,21 @@ namespace mongo {
 
     namespace {
 
+        long long parseIsoDate(const std::string &iso);
+        long long numberOf(const BSONValuePtr &v);
+
         // -------------------------------------------------------------
-        // Plain JSON tokenizer/parser producing a BSONValue tree where
-        // numbers are tagged NumberDouble/NumberInt/NumberLong by shape.
+        // JSON tokenizer/parser producing a BSONValue tree where numbers
+        // are tagged NumberDouble/NumberInt/NumberLong by shape. In
+        // relaxed mode also accepts mongo shell notation: unquoted keys,
+        // single quotes, ObjectId()/ISODate()/... constructors, regex
+        // literals and trailing commas.
         // -------------------------------------------------------------
 
         class JsonParser {
         public:
-            explicit JsonParser(const std::string &text) : _s(text) {}
+            explicit JsonParser(const std::string &text, bool relaxed = false)
+                : _s(text), _relaxed(relaxed) {}
 
             BSONValuePtr parse() {
                 skipWs();
@@ -33,10 +40,20 @@ namespace mongo {
                 return v;
             }
 
+            /** Parses one value and stops; caller reads position() for the rest */
+            BSONValuePtr parseOne() {
+                skipWs();
+                BSONValuePtr v = parseValue();
+                skipWs();
+                return v;
+            }
+
+            size_t position() const { return _pos; }
+
         private:
             [[noreturn]] void fail(const std::string &msg) {
-                throw std::runtime_error("JSON parse error at offset " +
-                                         std::to_string(_pos) + ": " + msg);
+                throw shelljson::ParseMsgAssertionException(
+                    msg, static_cast<int>(_pos));
             }
 
             void skipWs() {
@@ -57,14 +74,16 @@ namespace mongo {
             }
 
             BSONValuePtr parseValue() {
-                switch (peek()) {
-                    case '{': return parseObject();
-                    case '[': return parseArray();
-                    case '"': return parseStringValue();
-                    case 't': case 'f': return parseBool();
-                    case 'n': return parseNull();
-                    default: return parseNumber();
-                }
+                const char c = peek();
+                if (c == '{') return parseObject();
+                if (c == '[') return parseArray();
+                if (c == '"' || (_relaxed && c == '\'')) return parseStringValue();
+                if (_relaxed && (std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$'))
+                    return parseIdentifierValue();
+                if (!_relaxed && (c == 't' || c == 'f')) return parseBool();
+                if (!_relaxed && c == 'n') return parseNull();
+                if (_relaxed && c == '/') return parseRegexLiteral();
+                return parseNumber();
             }
 
             BSONValuePtr parseObject() {
@@ -74,17 +93,47 @@ namespace mongo {
                 if (peek() == '}') { ++_pos; return obj; }
                 while (true) {
                     skipWs();
-                    std::string key = parseString();
+                    std::string key = parseKey();
                     skipWs();
                     expect(':');
                     skipWs();
                     obj->fields.emplace_back(key, parseValue());
                     skipWs();
-                    if (peek() == ',') { ++_pos; continue; }
+                    if (peek() == ',') {
+                        ++_pos;
+                        if (_relaxed) {  // tolerate trailing comma
+                            skipWs();
+                            if (peek() == '}') { ++_pos; break; }
+                        }
+                        continue;
+                    }
                     expect('}');
                     break;
                 }
                 return obj;
+            }
+
+            std::string parseKey() {
+                const char c = peek();
+                if (c == '"' || (_relaxed && c == '\''))
+                    return parseString();
+                if (!_relaxed)
+                    fail("expected quoted field name");
+                // Unquoted identifier key (shell notation)
+                std::string key;
+                while (_pos < _s.size()) {
+                    const char k = _s[_pos];
+                    if (std::isalnum(static_cast<unsigned char>(k)) || k == '_' || k == '$' ||
+                        k == '.') {
+                        key += k;
+                        ++_pos;
+                    } else {
+                        break;
+                    }
+                }
+                if (key.empty())
+                    fail("expected field name");
+                return key;
             }
 
             BSONValuePtr parseArray() {
@@ -105,12 +154,15 @@ namespace mongo {
             }
 
             std::string parseString() {
-                expect('"');
+                const char quote = peek();
+                if (quote != '"' && !(_relaxed && quote == '\''))
+                    fail("expected string");
+                ++_pos;
                 std::string out;
                 while (true) {
                     if (_pos >= _s.size()) fail("unterminated string");
                     char c = _s[_pos++];
-                    if (c == '"') break;
+                    if (c == quote) break;
                     if (c == '\\') {
                         if (_pos >= _s.size()) fail("bad escape");
                         char e = _s[_pos++];
@@ -199,6 +251,189 @@ namespace mongo {
                 return v;
             }
 
+            /** Regex literal: /pattern/flags */
+            BSONValuePtr parseRegexLiteral() {
+                expect('/');
+                std::string pattern;
+                while (_pos < _s.size() && _s[_pos] != '/') {
+                    if (_s[_pos] == '\\' && _pos + 1 < _s.size())
+                        pattern += _s[_pos++];
+                    pattern += _s[_pos++];
+                }
+                expect('/');
+                std::string flags;
+                while (_pos < _s.size() &&
+                       std::isalpha(static_cast<unsigned char>(_s[_pos])))
+                    flags += _s[_pos++];
+                auto v = std::make_shared<BSONValue>();
+                v->type = RegEx;
+                v->str = pattern;
+                v->str2 = flags;
+                return v;
+            }
+
+            std::string parseIdentifier() {
+                std::string id;
+                while (_pos < _s.size()) {
+                    const char c = _s[_pos];
+                    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$') {
+                        id += c;
+                        ++_pos;
+                    } else {
+                        break;
+                    }
+                }
+                return id;
+            }
+
+            /** Arguments of a shell constructor call: ( v1, v2, ... ) */
+            std::vector<BSONValuePtr> parseCallArgs() {
+                std::vector<BSONValuePtr> args;
+                skipWs();
+                expect('(');
+                skipWs();
+                if (peek() == ')') { ++_pos; return args; }
+                while (true) {
+                    skipWs();
+                    args.push_back(parseValue());
+                    skipWs();
+                    if (peek() == ',') { ++_pos; continue; }
+                    expect(')');
+                    break;
+                }
+                return args;
+            }
+
+            static std::string argString(const std::vector<BSONValuePtr> &args, size_t i) {
+                if (i >= args.size() || !args[i]) return std::string();
+                const auto &v = *args[i];
+                if (v.type == mongo::String) return v.str;
+                if (v.type == NumberInt) return std::to_string(v.numberInt);
+                if (v.type == NumberLong) return std::to_string(v.numberLong);
+                if (v.type == NumberDouble) return std::to_string(v.numberDouble);
+                return std::string();
+            }
+
+            static long long argNumber(const std::vector<BSONValuePtr> &args, size_t i) {
+                if (i >= args.size() || !args[i]) return 0;
+                return numberOf(args[i]);
+            }
+
+            /** Shell notation values: true/false/null/undefined, ObjectId(...), ... */
+            BSONValuePtr parseIdentifierValue() {
+                const size_t start = _pos;
+                std::string id = parseIdentifier();
+
+                if (id == "new") {  // new Date(...), new ObjectId(...)
+                    skipWs();
+                    id = parseIdentifier();
+                }
+
+                auto v = std::make_shared<BSONValue>();
+
+                if (id == "true" || id == "false") {
+                    v->type = mongo::Bool;
+                    v->boolean = (id == "true");
+                    return v;
+                }
+                if (id == "null") { v->type = jstNULL; return v; }
+                if (id == "undefined") { v->type = Undefined; return v; }
+                if (id == "MinKey") { v->type = MinKey; maybeSkipCall(); return v; }
+                if (id == "MaxKey") { v->type = MaxKey; maybeSkipCall(); return v; }
+                if (id == "NaN") { v->type = NumberDouble; v->numberDouble = NAN; return v; }
+                if (id == "Infinity") { v->type = NumberDouble; v->numberDouble = HUGE_VAL; return v; }
+
+                if (id == "ObjectId") {
+                    v->type = jstOID;
+                    v->oid = OID(argString(parseCallArgs(), 0));
+                    return v;
+                }
+                if (id == "ISODate" || id == "Date") {
+                    auto args = parseCallArgs();
+                    v->type = mongo::Date;
+                    if (!args.empty() && args[0]->type == mongo::String)
+                        v->date = Date_t::fromMillisSinceEpoch(parseIsoDate(args[0]->str));
+                    else
+                        v->date = Date_t::fromMillisSinceEpoch(argNumber(args, 0));
+                    return v;
+                }
+                if (id == "NumberLong") {
+                    auto args = parseCallArgs();
+                    v->type = NumberLong;
+                    v->numberLong = args.empty() ? 0 :
+                        std::strtoll(argString(args, 0).c_str(), nullptr, 10);
+                    return v;
+                }
+                if (id == "NumberInt") {
+                    v->type = NumberInt;
+                    v->numberInt = static_cast<int>(argNumber(parseCallArgs(), 0));
+                    return v;
+                }
+                if (id == "NumberDecimal") {
+                    v->type = NumberDecimal;
+                    v->str = argString(parseCallArgs(), 0);
+                    return v;
+                }
+                if (id == "Timestamp") {
+                    auto args = parseCallArgs();
+                    v->type = bsonTimestamp;
+                    v->timestamp = Timestamp(static_cast<unsigned>(argNumber(args, 0)),
+                                             static_cast<unsigned>(argNumber(args, 1)));
+                    return v;
+                }
+                if (id == "BinData") {
+                    auto args = parseCallArgs();
+                    v->type = BinData;
+                    v->binSubType = static_cast<BinDataType>(argNumber(args, 0));
+                    v->binary = base64::decode(argString(args, 1));
+                    return v;
+                }
+                if (id == "UUID" || id == "LUUID" || id == "JUUID" || id == "NUUID" ||
+                    id == "PYUUID") {
+                    auto args = parseCallArgs();
+                    v->type = BinData;
+                    v->binSubType = (id == "UUID") ? newUUID : bdtUUID;
+                    std::string hex = argString(args, 0);
+                    hex.erase(std::remove_if(hex.begin(), hex.end(),
+                                  [](char c) { return c == '-' || c == '{' || c == '}'; }),
+                              hex.end());
+                    for (size_t i = 0; i + 1 < hex.size(); i += 2)
+                        v->binary += static_cast<char>(
+                            std::strtol(hex.substr(i, 2).c_str(), nullptr, 16));
+                    return v;
+                }
+                if (id == "DBRef") {
+                    auto args = parseCallArgs();
+                    v->type = DBRef;
+                    v->str = argString(args, 0);
+                    v->str2 = argString(args, 1);
+                    return v;
+                }
+                if (id == "Code") {
+                    v->type = Code;
+                    v->str = argString(parseCallArgs(), 0);
+                    return v;
+                }
+                if (id == "RegExp") {
+                    auto args = parseCallArgs();
+                    v->type = RegEx;
+                    v->str = argString(args, 0);
+                    v->str2 = argString(args, 1);
+                    return v;
+                }
+
+                _pos = start;
+                fail("unknown identifier '" + id + "'");
+            }
+
+            /** MinKey/MaxKey may be written with or without () */
+            void maybeSkipCall() {
+                skipWs();
+                if (_pos < _s.size() && _s[_pos] == '(') {
+                    parseCallArgs();
+                }
+            }
+
             BSONValuePtr parseNumber() {
                 size_t start = _pos;
                 if (peek() == '-') ++_pos;
@@ -234,6 +469,7 @@ namespace mongo {
 
             const std::string &_s;
             size_t _pos = 0;
+            bool _relaxed = false;
         };
 
         // -------------------------------------------------------------
@@ -262,8 +498,6 @@ namespace mongo {
                 default: return 0;
             }
         }
-
-        long long parseIsoDate(const std::string &iso);
 
         BSONValuePtr decodeExtended(const BSONValuePtr &node);
 
@@ -581,8 +815,31 @@ namespace mongo {
         JsonParser parser(json);
         BSONValuePtr plain = parser.parse();
         if (plain->type != Object && plain->type != mongo::Array)
-            throw std::runtime_error("JSON text must be an object or array");
+            throw shelljson::ParseMsgAssertionException(
+                "JSON text must be an object or array", 0);
         return BSONObj(decodeExtended(plain));
+    }
+
+    namespace shelljson {
+
+        BSONObj fromjson(const std::string &json) {
+            JsonParser parser(json, true /*relaxed shell notation*/);
+            BSONValuePtr plain = parser.parse();
+            if (plain->type != Object && plain->type != mongo::Array)
+                throw ParseMsgAssertionException("JSON text must be an object or array", 0);
+            return BSONObj(decodeExtended(plain));
+        }
+
+        BSONObj fromjson(const char *json, int *len) {
+            const std::string text(json);
+            JsonParser parser(text, true /*relaxed shell notation*/);
+            BSONValuePtr plain = parser.parseOne();
+            if (len)
+                *len = static_cast<int>(parser.position());
+            if (plain->type != Object && plain->type != mongo::Array)
+                throw ParseMsgAssertionException("JSON text must be an object or array", 0);
+            return BSONObj(decodeExtended(plain));
+        }
     }
 
     std::string tojson(const BSONObj &obj, JsonStringFormat format, bool /*pretty*/) {

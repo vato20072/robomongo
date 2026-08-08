@@ -36,10 +36,15 @@ set(SOURCES
     core/domain/ScriptInfo.cpp
     core/events/MongoEventsInfo.cpp
     shell/db/ptimeutil.cpp
-    shell/bson/json.cpp
+
+    bson/bson.cpp
+    bson/json.cpp
+    bson/mongouri.cpp
 
     # Isolated Scope #2
     core/engine/ScriptEngine.cpp
+    core/engine/MongoshExecutor.cpp
+    core/engine/MongoshOutput.cpp
     core/events/MongoEvents.cpp
     core/domain/MongoDocument.cpp
     gui/AppStyle.cpp
@@ -159,9 +164,14 @@ target_link_libraries(robomongo
         ${WebEngineWidgets}
         qjson
         qscintilla
-        mongodb
         ssh
         Threads::Threads)   # Target from FindThreads CMake module
+
+# mongo/... includes resolve to compat shims (robobson) since the pivot
+target_include_directories(robomongo
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/compat
+        ${Boost_INCLUDE_DIRS})
 
 if(APPLE)
   find_library(SECURITY NAMES Security)
@@ -214,7 +224,7 @@ target_compile_definitions(robomongo
         BUILD_NUMBER="${BUILD_NUMBER}"
         PROJECT_NAME_LOWERCASE="${PROJECT_NAME_LOWERCASE}"
         PROJECT_QT_VERSION="${Qt5Core_VERSION}"        
-        MongoDB_VERSION="${MongoDB_VERSION}"
+        MongoDB_VERSION="mongosh ${ROBO_MONGOSH_VERSION}"
         OPENSSL_VERSION="${OPENSSL_VERSION}"
         LIBSSH2_VERSION="${LIBSSH2_VERSION}"
         QJSON_VERSION="${QJSON_VERSION}"
@@ -273,14 +283,7 @@ include(RobomongoInstall)
 #
 # Tests targets (code below should be moved to separate file)
 add_executable(tests WIN32 EXCLUDE_FROM_ALL app/main_test.cpp gui/editors/JSLexer.cpp)
-target_link_libraries(tests Qt5::Widgets qjson qscintilla mongodb Threads::Threads)
+target_link_libraries(tests Qt5::Widgets qjson qscintilla Threads::Threads)
 target_include_directories(tests
     PRIVATE
         ${CMAKE_HOME_DIRECTORY}/src)
-
-# Target that creates original MongoDB shell
-# Used to test compilation and linking
-add_executable(shell EXCLUDE_FROM_ALL shell/shell/dbshell.cpp)
-target_link_libraries(shell
-    mongodb
-    Threads::Threads)       # Target from FindThreads CMake module

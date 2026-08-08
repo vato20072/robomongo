@@ -378,7 +378,9 @@ namespace Robomongo
             authDb, user, pwd, authMechanismFromStr(authMechanism)
         );
         // Set SSL Tab
-        if(mongoUri.getSSLMode() == mongo::transport::ConnectSSLMode::kEnableSSL) {
+        bool const sslEnabled = mongoUri.getOption("tls").get_value_or(
+            mongoUri.getOption("ssl").get_value_or("")) == "true";
+        if (sslEnabled) {
             auto tlsAllowInvalidCertificates = mongoUri.getOption("tlsAllowInvalidCertificates");
             int const authMethodIndex = tlsAllowInvalidCertificates.get_value_or("") == "true" ? 0 : 1;
             auto const caFile = mongoUri.getOption("tlsCAFile").get_value_or("");

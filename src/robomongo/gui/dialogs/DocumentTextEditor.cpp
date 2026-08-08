@@ -18,7 +18,7 @@
 #include "robomongo/gui/GuiRegistry.h"
 
 #include "robomongo/core/utils/QtUtils.h"
-#include "robomongo/shell/bson/json.h"
+#include "robomongo/bson/bson.h"
 
 
 namespace Robomongo
@@ -156,11 +156,11 @@ namespace Robomongo
             _obj.clear();
             while (offset != jsonLen)
             {
-                mongo::BSONObj doc = mongo::Robomongo::fromjson(json+offset, &len);
+                mongo::BSONObj doc = mongo::shelljson::fromjson(json+offset, &len);
                 _obj.push_back(doc);
                 offset += len;
             }
-        } catch (const mongo::Robomongo::ParseMsgAssertionException &ex) {
+        } catch (const mongo::shelljson::ParseMsgAssertionException &ex) {
 //            v0.9
             QString message = QtUtils::toQString(ex.reason());
             int offset = ex.offset();
