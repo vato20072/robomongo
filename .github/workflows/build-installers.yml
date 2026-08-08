@@ -28,6 +28,8 @@ concurrency:
 
 env:
   ROBO_MONGOSH_VERSION: ${{ github.event.inputs.mongosh_version || '2.9.2' }}
+  # Minimum MongoDB Server version supported by the bundled mongosh 2.x
+  MIN_MONGODB_VERSION: "6.0"
 
 jobs:
   macos:
@@ -35,9 +37,21 @@ jobs:
     # same pinned toolchain used for local development
     runs-on: macos-15
     timeout-minutes: 90
+    permissions:
+      contents: write   # version-bump commit and release publishing
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # The app version is maintained in CMakeLists.txt; CI only reads it
+      # (for the release tag and name)
+      - name: Read project version
+        id: version
+        run: |
+          MAJOR=$(sed -n 's/set(PROJECT_VERSION_MAJOR *"\(.*\)")/\1/p' CMakeLists.txt)
+          MINOR=$(sed -n 's/set(PROJECT_VERSION_MINOR *"\(.*\)")/\1/p' CMakeLists.txt)
+          PATCH=$(sed -n 's/set(PROJECT_VERSION_PATCH *"\(.*\)")/\1/p' CMakeLists.txt)
+          echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
 
       - name: Install devbox
         uses: jetify-com/devbox-install-action@v0.13.0
@@ -56,9 +70,25 @@ jobs:
       - name: Upload dmg
         uses: actions/upload-artifact@v4
         with:
-          name: robo3t-macos-arm64-mongosh-${{ env.ROBO_MONGOSH_VERSION }}
+          # <app>-<os>-<arch>-mongosh-<min supported MongoDB>-<mongosh version>
+          name: robo3t-macos-arm64-mongosh-${{ env.MIN_MONGODB_VERSION }}-${{ env.ROBO_MONGOSH_VERSION }}
           path: build/release/package/*.dmg
           if-no-files-found: error
+
+      - name: Publish release (master only)
+        if: github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "Robo 3T ${{ steps.version.outputs.version }} (mongosh ${{ env.ROBO_MONGOSH_VERSION }}, MongoDB ${{ env.MIN_MONGODB_VERSION }}+)"
+          body: |
+            Automated build of Robo 3T ${{ steps.version.outputs.version }}.
+
+            - Bundled shell: mongosh ${{ env.ROBO_MONGOSH_VERSION }}
+            - Supported MongoDB Server: ${{ env.MIN_MONGODB_VERSION }} and newer
+            - macOS: native Apple Silicon (arm64) .dmg
+          files: build/release/package/*.dmg
+          fail_on_unmatched_files: true
 
   # ------------------------------------------------------------------
   # Windows job DISABLED for now (decision 2026-08-08): it fails during
