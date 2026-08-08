@@ -9,6 +9,7 @@
 
 #include "robomongo/core/settings/ConnectionSettings.h"
 #include "robomongo/core/settings/CredentialSettings.h"
+#include "robomongo/core/settings/ReplicaSetSettings.h"
 #include "robomongo/core/settings/SslSettings.h"
 
 namespace Robomongo
@@ -47,6 +48,22 @@ namespace Robomongo
             ? connection->serverHost() + ":" + std::to_string(connection->serverPort())
             : serverAddr;
 
+        // Replica set: connect with all members (and set name when known)
+        std::string replicaSetName;
+        if (connection->isReplicaSet() && serverAddr.empty()) {
+            ReplicaSetSettings *rs = connection->replicaSetSettings();
+            const std::vector<std::string> &members = rs->members();
+            if (!members.empty()) {
+                hostPort.clear();
+                for (size_t i = 0; i < members.size(); ++i) {
+                    if (i) hostPort += ",";
+                    hostPort += members[i];
+                }
+            }
+            replicaSetName = rs->setNameUserEntered().empty() ? rs->cachedSetName()
+                                                              : rs->setNameUserEntered();
+        }
+
         std::string database = dbName;
         if (database.empty())
             database = connection->defaultDatabase().empty() ? "test"
@@ -63,8 +80,11 @@ namespace Robomongo
 
         // Direct connection: Robo addresses specific hosts itself (and via
         // SSH tunnels the remote is not aware of the tunnel address)
-        if (!connection->isReplicaSet())
+        if (!connection->isReplicaSet() || !serverAddr.empty())
             uri += "?directConnection=true";
+        else if (!replicaSetName.empty())
+            uri += "?replicaSet=" + QString::fromStdString(QUrl::toPercentEncoding(
+                       QString::fromStdString(replicaSetName)).toStdString());
 
         args << uri;
 

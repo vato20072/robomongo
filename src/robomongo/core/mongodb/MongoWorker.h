@@ -4,8 +4,6 @@
 #include <QMutex>
 #include <unordered_set>
 
-#include <mongo/client/dbclient_rs.h> 
-
 #include "robomongo/core/events/MongoEvents.h"
 
 QT_BEGIN_NAMESPACE
@@ -19,11 +17,17 @@ namespace Robomongo
     class ScriptEngine;
     class ConnectionSettings;
 
+    /**
+     * Per-connection worker thread. Since the mongosh pivot every server
+     * interaction (connection checks, tree loading, CRUD, script
+     * execution) goes through ScriptEngine/MongoshExecutor - there is no
+     * embedded driver connection anymore.
+     */
     class MongoWorker : public QObject
     {
         Q_OBJECT
 
-    public:        
+    public:
         explicit MongoWorker(ConnectionSettings *connection, bool isLoadMongoRcJs, int batchSize,
                              double mongoTimeoutSec, int shellTimeoutSec, QObject *parent = nullptr);
 
@@ -37,8 +41,7 @@ namespace Robomongo
         void init();
 
         /**
-         * @brief Every minute we are issuing { ping : 1 } command to every used connection
-         * in order to avoid dropped connections.
+         * @brief Periodic no-op guard (sessions are per-evaluation now)
          */
         void keepAlive();
 
@@ -107,7 +110,6 @@ namespace Robomongo
          * @brief Execute javascript
          */
         void handle(ExecuteScriptRequest *event);
-        void retry(ExecuteScriptRequest *event);
         void handle(StopScriptRequest *event);
 
         void handle(AutocompleteRequest *event);
@@ -117,9 +119,9 @@ namespace Robomongo
         void handle(CreateCollectionRequest *event);
         void handle(DropCollectionRequest *event);
         void handle(RenameCollectionRequest *event);
-        void handle(DuplicateCollectionRequest *event);       
+        void handle(DuplicateCollectionRequest *event);
         void handle(CopyCollectionToDiffServerRequest *event); // todo: unused? remove
- 
+
         void handle(CreateUserRequest *event);
         void handle(DropUserRequest *event);
 
@@ -130,9 +132,6 @@ namespace Robomongo
         virtual void timerEvent(QTimerEvent *);
 
     private:
-        // Added after Mongo 4.0 to fix connection failures seen after a first edit/add/remove doc. operation
-        void restartReplicaSetConnection();
-
         /**
          * @brief Send event to this MongoWorker
          */
@@ -141,42 +140,17 @@ namespace Robomongo
         std::vector<std::string> getDatabaseNamesSafe(EstablishConnectionRequest* event = nullptr);
         std::string getAuthBase() const;
 
-        // Returns a pair of DBClientBase* connection and error string
-        std::pair<mongo::DBClientBase*, std::string> getConnection(bool mayReturnNull = false);
         MongoClient *getClient();
 
         /**
-        *@brief Reset and update global mongo SSL settings (mongo::sslGlobalParams)
-        */
-        void configureSSL();
-
-        /**
-        *@brief Update global mongo SSL settings (mongo::sslGlobalParams) according to active connection 
-        *       request's SSL settings.
-        */
-        void updateGlobalSSLparams() const;
-
-        /**
-        *@brief Reset global mongo SSL settings (mongo::sslGlobalParams) into default zero state
-        */
-        void resetGlobalSSLparams() const;
-
-        /**
-        *@brief Update Replica Set related parameters/settings.
+        *@brief Live replica-set information via rs.status() evaluation
         */
         ReplicaSet getReplicaSetInfo() const;
-
-        std::string connectAndGetReplicaSetName() const;
 
         /**
          * @brief Send reply event to object 'obj'
          */
         void reply(QObject *receiver, Event *event);
-
-        /**
-        * @brief Send hear beat messages to database in order to keep connection alive
-        */
-        void pingDatabase(mongo::DBClientBase *dbclient) const;
 
         QThread *_thread;
         QMutex _firstConnectionMutex;
@@ -190,9 +164,6 @@ namespace Robomongo
         double _mongoTimeoutSec;
         int _shellTimeoutSec;
         QAtomicInteger<int> _isQuiting;
-
-        std::unique_ptr<mongo::DBClientConnection> _dbclient;
-        std::unique_ptr<mongo::DBClientReplicaSet> _dbclientRepSet;
 
         ConnectionSettings *_connSettings;
 

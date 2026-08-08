@@ -1,20 +1,28 @@
 #pragma once
+#include <vector>
 
-#include <mongo/client/dbclient_base.h>
-#include <mongo/bson/bsonobj.h>
-
+#include "robomongo/bson/bson.h"
 #include "robomongo/core/Core.h"
 #include "robomongo/core/domain/MongoQueryInfo.h"
 #include "robomongo/core/domain/MongoUser.h"
 #include "robomongo/core/domain/MongoFunction.h"
+#include "robomongo/core/domain/MongoNamespace.h"
 #include "robomongo/core/events/MongoEventsInfo.h"
 
 namespace Robomongo
 {
+    class ScriptEngine;
+
+    /**
+     * Data-layer operations for the explorer tree and editors, implemented
+     * as mongosh evaluations (via ScriptEngine::evalCommand) since the
+     * mongosh pivot - previously these went through the embedded driver
+     * (mongo::DBClientBase).
+     */
     class MongoClient
     {
     public:
-        MongoClient(mongo::DBClientBase *const scopedConnection);
+        explicit MongoClient(ScriptEngine *const engine);
 
         std::vector<std::string> getCollectionNamesWithDbname(const std::string &dbname) const;
         std::vector<std::string> getDatabaseNames() const;
@@ -45,7 +53,6 @@ namespace Robomongo
         void renameCollection(const MongoNamespace &ns, const std::string &newCollectionName);
         void duplicateCollection(const MongoNamespace &ns, const std::string &newCollectionName);
         void dropCollection(const MongoNamespace &ns);
-        void copyCollectionToDiffServer(mongo::DBClientBase *const, const MongoNamespace &from, const MongoNamespace &to);
 
         void insertDocument(const mongo::BSONObj &obj, const MongoNamespace &ns);
         void saveDocument(const mongo::BSONObj &obj, const MongoNamespace &ns);
@@ -58,7 +65,9 @@ namespace Robomongo
         void done();
 
     private:
-        mongo::DBClientBase *const _dbclient;
-        void checkLastErrorAndThrow(const std::string &db);
+        /** Runs a script (optionally against dbName); throws std::runtime_error on error */
+        mongo::BSONObj eval(const std::string &script, const std::string &dbName = "") const;
+
+        ScriptEngine *const _engine;
     };
 }

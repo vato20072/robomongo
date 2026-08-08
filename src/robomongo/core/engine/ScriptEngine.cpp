@@ -266,6 +266,33 @@ namespace Robomongo
                                     _currentDbName, true, false);
     }
 
+    mongo::BSONObj ScriptEngine::evalCommand(const std::string &script, const std::string &dbName)
+    {
+        QMutexLocker lock(&_mutex);
+
+        if (!_initialized)
+            throw std::runtime_error("Shell engine is not initialized.");
+
+        const QStringList connArgs = MongoshExecutor::connectionArgs(
+            _connection, _serverAddr, dbName.empty() ? _currentDbName : dbName);
+
+        MongoshExecutor::EvalResult res = _executor.eval(connArgs, {script}, _timeoutSec);
+
+        if (res.failedToStart)
+            throw std::runtime_error(res.errorOutput);
+        if (res.timedOut)
+            throw std::runtime_error("Operation timed out.");
+        if (res.output.isError)
+            throw std::runtime_error(res.output.errorMessage);
+        if (!res.output.hasResult && res.exitCode != 0) {
+            std::string message = res.errorOutput.empty() ? res.output.text : res.errorOutput;
+            // Strip the __ROBO_META__ line if the prelude was not used
+            throw std::runtime_error(message.empty() ? "mongosh evaluation failed" : message);
+        }
+
+        return res.output.result;
+    }
+
     void ScriptEngine::interrupt()
     {
         _executor.interrupt();

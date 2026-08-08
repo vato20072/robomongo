@@ -433,6 +433,16 @@ namespace mongo {
     public:
         HostAndPort() = default;
         HostAndPort(const std::string &host, int port) : _host(host), _port(port) {}
+        /** Parses "host:port" (port defaults to 27017 when absent) */
+        explicit HostAndPort(const std::string &hostPort) {
+            const size_t colon = hostPort.rfind(':');
+            if (colon == std::string::npos) {
+                _host = hostPort;
+            } else {
+                _host = hostPort.substr(0, colon);
+                try { _port = std::stoi(hostPort.substr(colon + 1)); } catch (...) {}
+            }
+        }
         const std::string &host() const { return _host; }
         int port() const { return _port; }
         bool empty() const { return _host.empty(); }
@@ -443,4 +453,19 @@ namespace mongo {
     };
 
     using StringData = std::string;
+
+    /** Minimal stand-in for the legacy driver's Query wrapper */
+    class Query {
+    public:
+        Query() = default;
+        explicit Query(const BSONObj &obj) : _obj(obj) {}
+        const BSONObj &obj() const { return _obj; }
+    private:
+        BSONObj _obj;
+    };
+
+    /** The 4.2 fork exposed a relaxed parser as mongo::Robomongo::fromjson */
+    namespace Robomongo {
+        inline BSONObj fromjson(const std::string &json) { return mongo::fromjson(json); }
+    }
 }

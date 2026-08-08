@@ -38,6 +38,14 @@ namespace Robomongo
 
         void invalidateDbCollectionsCache();
 
+        /**
+         * Runs a script and returns its structured result. Used by
+         * MongoClient for data-layer operations (list databases, CRUD,
+         * indexes...). Throws std::runtime_error on evaluation errors,
+         * timeouts and process failures.
+         */
+        mongo::BSONObj evalCommand(const std::string &script, const std::string &dbName = std::string());
+
         bool failedScope() const { return _failedScope; }
 
         void changeTimeout(int newTimeout) { _timeoutSec = newTimeout; }
