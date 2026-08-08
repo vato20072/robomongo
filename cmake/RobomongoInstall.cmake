@@ -66,19 +66,20 @@ if(SYSTEM_WINDOWS)
         "${OpenSSL_DIR}/libcrypto-1_1-x64.dll"
         DESTINATION ${bin_dir})
 elseif(SYSTEM_MACOSX)
+    # Any OpenSSL version/layout (source build or installed lib/ dir)
+    file(GLOB openssl_shared_libs
+        "${OpenSSL_LIB_DIR}/libssl*.dylib"
+        "${OpenSSL_LIB_DIR}/libcrypto*.dylib")
     install(
-        FILES 
-        "${OpenSSL_DIR}/libssl.1.1.dylib"
-        "${OpenSSL_DIR}/libcrypto.1.1.dylib"
+        FILES ${openssl_shared_libs}
         DESTINATION ${lib_dir}/lib)
 elseif(SYSTEM_LINUX)
+    file(GLOB openssl_shared_libs
+        "${OpenSSL_LIB_DIR}/libssl.so*"
+        "${OpenSSL_LIB_DIR}/libcrypto.so*")
     install(
-        FILES 
-        "${OpenSSL_DIR}/libssl.so"
-        "${OpenSSL_DIR}/libssl.so.1.0.0"        
-        "${OpenSSL_DIR}/libcrypto.so"        
-        "${OpenSSL_DIR}/libcrypto.so.1.0.0"
-        DESTINATION ${lib_dir})         
+        FILES ${openssl_shared_libs}
+        DESTINATION ${lib_dir})
 endif()
 
 # Install binary
@@ -98,8 +99,8 @@ install(
 
 # Install common dependencies
 SET(QT_LIBS Core Gui Widgets PrintSupport Network Xml)
-if(NOT SYSTEM_LINUX)
-    SET(QT_LIBS ${QT_LIBS} WebEngineWidgets WebEngineCore Quick 
+if(ROBO_WEBENGINE)
+    SET(QT_LIBS ${QT_LIBS} WebEngineWidgets WebEngineCore Quick
                            QuickWidgets WebChannel Qml Positioning)
 endif()
 install_qt_lib(${QT_LIBS})
@@ -131,8 +132,10 @@ elseif(SYSTEM_MACOSX)
         FILES       "${CMAKE_SOURCE_DIR}/install/macosx/robomongo.icns"
         DESTINATION "${resources_dir}")
 
-    # Install styles    
-    install(FILES "${QT_STYLES_DIR}/libqmacstyle.dylib" DESTINATION ${styles_dir})
+    # Install styles (via plugin target: robust across Qt layouts)
+    if(TARGET Qt5::QMacStylePlugin)
+        install_qt_plugins(QMacStylePlugin)
+    endif()
 elseif(SYSTEM_WINDOWS)
     install_qt_plugins(
         QWindowsIntegrationPlugin

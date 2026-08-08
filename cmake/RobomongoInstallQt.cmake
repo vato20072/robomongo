@@ -19,18 +19,27 @@ function(install_qt_lib)
         endif()
 
         if(SYSTEM_MACOSX)
-            set(module_name Qt${module})
+            if(target_path MATCHES "\\.dylib")
+                # Non-framework Qt build (e.g. Nix/devbox): plain dylibs
+                file(GLOB module_libs
+                    ${qt_lib_dir}/${CMAKE_SHARED_LIBRARY_PREFIX}${module_name}*)
+                install(FILES ${module_libs}
+                    DESTINATION ${lib_dir})
+            else()
+                set(module_name Qt${module})
 
-            # On Mac OS we are still located in .framework folder,
-            # and we need to go one level up
-            get_filename_component(qt_lib_dir ${qt_lib_dir} DIRECTORY)
+                # Derive the directory containing the *.framework folders
+                # from the QtCore location - robust against layout
+                # differences between Qt distributions
+                string(REGEX REPLACE "/QtCore\\.framework.*$" "" qt_framework_dir "${target_path}")
 
-            install(
-                DIRECTORY ${qt_lib_dir}/${module_name}.framework
-                DESTINATION ${lib_dir}
-                USE_SOURCE_PERMISSIONS
-                PATTERN "*_debug" EXCLUDE      # Exclude debug libraries
-                PATTERN "Headers" EXCLUDE)     # Exclude Headers folders
+                install(
+                    DIRECTORY ${qt_framework_dir}/${module_name}.framework
+                    DESTINATION ${lib_dir}
+                    USE_SOURCE_PERMISSIONS
+                    PATTERN "*_debug" EXCLUDE      # Exclude debug libraries
+                    PATTERN "Headers" EXCLUDE)     # Exclude Headers folders
+            endif()
         endif()
 
         if (SYSTEM_WINDOWS)
