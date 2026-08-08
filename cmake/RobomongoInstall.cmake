@@ -60,10 +60,15 @@ install(
 
 # Install OpenSSL dynamic lib files
 if(SYSTEM_WINDOWS)
+    # Any OpenSSL version (1.1/3.x); DLLs live at the root for source
+    # builds, under bin/ for installed distributions
+    file(GLOB openssl_dlls
+        "${OpenSSL_DIR}/libssl-*.dll"
+        "${OpenSSL_DIR}/libcrypto-*.dll"
+        "${OpenSSL_DIR}/bin/libssl-*.dll"
+        "${OpenSSL_DIR}/bin/libcrypto-*.dll")
     install(
-        FILES 
-        "${OpenSSL_DIR}/libssl-1_1-x64.dll"
-        "${OpenSSL_DIR}/libcrypto-1_1-x64.dll"
+        FILES ${openssl_dlls}
         DESTINATION ${bin_dir})
 elseif(SYSTEM_MACOSX)
     # Any OpenSSL version/layout (source build or installed lib/ dir)

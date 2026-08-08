@@ -102,13 +102,20 @@ add_library(crypto SHARED IMPORTED)
     
 # todo: refactor
 if(SYSTEM_WINDOWS)
+    # Import libs live at the OpenSSL root for source builds, under lib/
+    # for installed distributions (e.g. Shining Light / choco / vcpkg)
+    if(EXISTS "${OpenSSL_DIR}/libssl.lib")
+        set(OpenSSL_LIB_DIR "${OpenSSL_DIR}")
+    else()
+        set(OpenSSL_LIB_DIR "${OpenSSL_DIR}/lib")
+    endif()
     set_target_properties(ssl PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES   "${OpenSSL_DIR}/include"
-        IMPORTED_IMPLIB                 "${OpenSSL_DIR}/libssl.lib"
+        IMPORTED_IMPLIB                 "${OpenSSL_LIB_DIR}/libssl.lib"
     )
     set_target_properties(crypto PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES   "${OpenSSL_DIR}/include"
-        IMPORTED_IMPLIB                 "${OpenSSL_DIR}/libcrypto.lib"
+        IMPORTED_IMPLIB                 "${OpenSSL_LIB_DIR}/libcrypto.lib"
     )
 else()
   if(SYSTEM_MACOSX)

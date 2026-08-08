@@ -4,7 +4,6 @@
     "cmake":      "3.31.7",
     "git":        "latest",
     "pkg-config": "latest",
-    "python":     "3.9",
     "mongosh":    "latest",
     "openssl_1_1": {
       "version":        "1.1.1w",
@@ -35,12 +34,12 @@
   "shell": {
     "init_hook": ["source ./devbox.d/init.sh"],
     "scripts": {
-      "shell-clone": "git clone --branch roboshell-v4.2 https://github.com/paralect/robomongo-shell.git \"$ROBOSHELL_DIR\"",
-      "shell-build": "bash devbox.d/build-shell.sh",
-      "configure":   "bin/configure",
-      "build":       "bin/build",
-      "run":         "bin/run",
-      "clean":       "bin/clean"
+      "configure": "bin/configure",
+      "build":     "bin/build",
+      "install":   "bin/install",
+      "pack":      "bin/pack",
+      "run":       "bin/run",
+      "clean":     "bin/clean"
     }
   }
 }

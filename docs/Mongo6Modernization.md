@@ -86,37 +86,52 @@ application:
 sidecar for 6.x+. Maximum compatibility, but you pay both maintenance
 bills; only worth it as a transition state (one or two releases).
 
-4. Recommended roadmap
-----------------------
+4. The pivot - IMPLEMENTED (branch mongosh-pivot)
+-------------------------------------------------
 
-* **Phase 0 — repo modernization (done in this change):** reproducible
-  devbox environment (`devbox.json`, [DevboxEnvironment.md](DevboxEnvironment.md)),
-  QtWebEngine made optional so the app builds with Nix-provided Qt.
-* **Phase 1 — execution seam:** extract an interface from
-  `Robomongo::ScriptEngine` (init / exec / interrupt / autocomplete) so
-  the embedded 4.2 engine becomes one pluggable implementation. Touch
-  points: `ScriptEngine`, `MongoWorker`, `MongoShell`.
-* **Phase 2 — mongosh executor:** implement the interface by driving a
-  bundled `mongosh` process; parse EJSON output into Robo's
-  `MongoDocument` model; wire cursor paging (`it`/`DBQuery.shellBatchSize`
-  equivalents) and shell timeouts; port autocomplete.
-* **Phase 3 — packaging (groundwork done):** `cmake/RobomongoMongosh.cmake`
-  downloads the platform's official standalone mongosh at configure time
-  (version selected via `ROBO_MONGOSH_VERSION`, disable with
-  `-DROBO_BUNDLE_MONGOSH=OFF`) and the install/package steps bundle it
-  next to the executable — this replaces "embed it in the installer"
-  from the 4.2 era. Remaining: ship mongosh as the default engine once
-  Phase 2 lands, keep 4.2 as fallback behind a setting; include the
-  bundled binary in macOS codesigning.
-* **Phase 4 — retire the fork:** drop `FindMongoDB.cmake`, the object
-  lists and the OpenSSL 1.1 pin; move minimum Qt to 5.15/Qt 6; produce
-  native arm64 macOS builds.
+The 4.2 interim was skipped entirely (decision: only MongoDB 6.0+
+matters). The embedded engine and driver are gone; the architecture is:
 
-5. Compatibility notes for the interim
---------------------------------------
+* **robobson** (`src/robomongo/bson/`): a compact mongo-API-compatible
+  document model backed by an order-preserving EJSON DOM. Provides the
+  `mongo::` API surface the GUI widgets use (BSONObj/BSONElement/
+  builders/iterators, OID/Date_t/Timestamp/Decimal128, MongoURI,
+  base64/hex/escape, LogSeverity, HostAndPort). Parses Extended JSON v2
+  (canonical/relaxed - what mongosh emits), legacy v1, and mongo shell
+  notation (ObjectId(), ISODate(), unquoted keys) for the document
+  editors. Legacy `<mongo/...>` includes resolve through shim headers in
+  `src/robomongo/compat/`.
+* **MongoshExecutor** (`src/robomongo/core/engine/`): runs the bundled
+  mongosh per evaluation (`--quiet --norc --json=canonical --eval`),
+  building the connection string and TLS/auth flags from
+  ConnectionSettings (incl. replica sets and SSH-tunnel overrides).
+* **ScriptEngine**: same public interface as before, now backed by the
+  executor. A JS prelude patches find/aggregate to capture paging
+  metadata and emits it (plus final db/server) as a `__ROBO_META__`
+  EJSON line on stderr at exit; stdout carries print output + the
+  structured result.
+* **MongoClient/MongoWorker**: all data-layer operations (tree loading,
+  CRUD, indexes, users, functions) are mongosh evaluations returning
+  EJSON.
+* **Packaging**: `cmake/RobomongoMongosh.cmake` downloads the platform's
+  official mongosh at configure time (`ROBO_MONGOSH_VERSION` env or
+  -D flag; `-DROBO_BUNDLE_MONGOSH=OFF` for offline) and installers ship
+  it next to the executable.
 
-Until Phase 2 lands, Robo 3T built from this repo still embeds the 4.2
-engine. Against MongoDB 6.x servers: basic CRUD, aggregation and most
-administrative commands work; SCRAM-SHA-1/256 auth works; anything relying
-on post-4.2 shell helpers, newer auth mechanisms, or post-4.2 server
-features will fail in the shell layer, not the connection layer.
+Wins: native Apple Silicon builds, minutes-long CI (no fork compile),
+no OpenSSL 1.1 constraint for the app itself, and server compatibility
+tracks mongosh (6.0/7.0/8.0+).
+
+5. Known follow-ups
+-------------------
+
+* Sessions are per-evaluation: shell variables do not persist between
+  Ctrl+Enter runs of a tab (each execution is a fresh mongosh). Robo's
+  own `use`-tracking preserves the current database.
+* Autocomplete is a static vocabulary + cached collection names
+  (mongosh's autocomplete API could be integrated later).
+* Unit tests (`src/robomongo-unit-tests`) still reference the old fork
+  and are disabled pending a port to robobson.
+* macOS codesigning should include the bundled mongosh binary.
+* OpenSSL is only needed by libssh2 (SSH tunnels) now; moving to
+  OpenSSL 3 requires bumping libssh2.
