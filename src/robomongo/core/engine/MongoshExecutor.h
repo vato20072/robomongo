@@ -71,4 +71,65 @@ namespace Robomongo
     private:
         std::atomic<QProcess *> _activeProcess{nullptr};
     };
+
+    /**
+     * A persistent mongosh REPL session: one process per connection, fed
+     * scripts over stdin, results returned as sentinel-framed EJSON
+     * envelopes. Eliminates the per-evaluation process spawn + TCP/TLS/auth
+     * handshake (warm evaluations are milliseconds instead of seconds) and
+     * restores shell-state persistence between executions.
+     *
+     * Not thread-safe: must be used from the thread that runs it first
+     * (the MongoWorker thread owns the QProcess).
+     */
+    class MongoshSession
+    {
+    public:
+        ~MongoshSession();
+
+        struct RunOutcome
+        {
+            /** Session could not start or the process died mid-run */
+            bool sessionError = false;
+            std::string sessionErrorMessage;
+
+            bool timedOut = false;
+
+            /** Script evaluated without throwing */
+            bool ok = false;
+            std::string errorName;
+            std::string errorMessage;
+
+            bool hasResult = false;          // result is an object/array
+            mongo::BSONObj result;
+            bool scalarResult = false;       // non-document result
+            std::string scalarText;
+
+            /** print()/helper output preceding the envelope */
+            std::string textOutput;
+
+            /** {server, db, queryInfo, aggrInfo} reported by the shell */
+            mongo::BSONObj meta;
+            bool hasMeta = false;
+        };
+
+        /**
+         * Runs a script in the session (starting/restarting the process as
+         * needed). dbName switches the session's current database first;
+         * isHelper sends the script as a raw REPL line (use/show/...).
+         */
+        RunOutcome run(const QStringList &connArgs, const std::string &script,
+                       const std::string &dbName, bool isHelper, int timeoutSec);
+
+        /** Kills the session process; the next run() starts a fresh one. */
+        void interrupt();
+        void shutdown();
+
+    private:
+        bool ensureStarted(const QStringList &connArgs, std::string *error);
+
+        std::unique_ptr<QProcess> _process;
+        QStringList _connArgs;
+        long long _sequence = 0;
+    };
 }

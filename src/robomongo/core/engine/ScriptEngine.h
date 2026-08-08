@@ -51,7 +51,7 @@ namespace Robomongo
         void changeTimeout(int newTimeout) { _timeoutSec = newTimeout; }
 
     private:
-        /** Parses the __ROBO_META__ line out of mongosh stderr */
+        /** Parsed form of the session envelope's meta object */
         struct ExecMeta
         {
             std::string server;
@@ -61,12 +61,15 @@ namespace Robomongo
             MongoQueryInfo queryInfo;
             bool hasQueryInfo = false;
             AggrInfo aggrInfo;
-            std::string cleanedStderr;
         };
-        ExecMeta extractMeta(const std::string &stderrText, AggrInfo requestAggrInfo);
+        ExecMeta extractMeta(const mongo::BSONObj &metaObj, AggrInfo requestAggrInfo);
+
+        /** Session connection arguments (stable per connection, so the
+         *  persistent process is reused; db switching happens per-run) */
+        QStringList sessionArgs() const;
 
         ConnectionSettings *_connection;
-        MongoshExecutor _executor;
+        MongoshSession _session;
 
         int _timeoutSec;
         std::string _serverAddr;     // SSH tunnel / replica-member override

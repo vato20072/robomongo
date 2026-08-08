@@ -8,6 +8,7 @@
 #include <QUrl>
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QTextStream>
 
@@ -271,5 +272,241 @@ namespace Robomongo
     {
         if (QProcess *p = _activeProcess.load())
             p->kill();
+    }
+}
+
+namespace Robomongo
+{
+    namespace
+    {
+        /**
+         * Session prelude, sent once per process over stdin (single line -
+         * the REPL evaluates line by line). Silences the prompt, patches
+         * Collection.find/aggregate to record paging metadata (cursor
+         * methods are async-rewriter proxies and must not be touched), and
+         * defines __roboRun which evaluates a script, materializes cursors
+         * and prints a sentinel-framed EJSON envelope.
+         */
+        const char *kSessionPrelude =
+            "prompt = () => \"\";"
+            " globalThis.__robo = { queryInfo: null, aggrInfo: null };"
+            " try { const __rc = db.getCollection(\"__robo_probe__\");"
+            " const __rp = Object.getPrototypeOf(__rc);"
+            " const __rf = __rp.find;"
+            " __rp.find = function (f, p, o) {"
+            "   try { globalThis.__robo.queryInfo = {"
+            "     db: (this._database && this._database.getName) ? this._database.getName() : db.getName(),"
+            "     collection: this.getName ? this.getName() : String(this._name),"
+            "     query: f || {}, fields: p || {}, limit: 0, skip: 0, batchSize: 0 }; } catch (e) {}"
+            "   return __rf.call(this, f, p, o); };"
+            " const __ra = __rp.aggregate;"
+            " __rp.aggregate = function (pl, o) {"
+            "   try { globalThis.__robo.aggrInfo = {"
+            "     collection: this.getName ? this.getName() : String(this._name),"
+            "     pipeline: pl || [], options: o || {} }; } catch (e) {}"
+            "   return __ra.apply(this, arguments); }; } catch (e) {}"
+            " globalThis.__roboRun = async function (id, src, dbName) {"
+            "   const out = { ok: true };"
+            "   globalThis.__robo.queryInfo = null; globalThis.__robo.aggrInfo = null;"
+            "   try {"
+            "     if (dbName) db = db.getSiblingDB(dbName);"
+            "     let v = eval(src);"
+            "     if (v && typeof v.then === \"function\") v = await v;"
+            "     if (v && typeof v.toArray === \"function\" && typeof v.hasNext === \"function\") {"
+            "       const d = [];"
+            "       while (d.length < 1000 && await v.hasNext()) d.push(await v.next());"
+            "       v = d; }"
+            "     out.hasResult = v !== undefined; out.result = v === undefined ? null : v;"
+            "   } catch (e) { out.ok = false; out.error = {"
+            "     name: (e && e.name) || \"Error\","
+            "     message: (e && (e.message || String(e))) || \"Error\" }; }"
+            "   if (globalThis.__robo.queryInfo) { try {"
+            "     const qi = globalThis.__robo.queryInfo;"
+            "     const lm = src.match(/\\.limit\\(\\s*(\\d+)/); if (lm) qi.limit = parseInt(lm[1]);"
+            "     const sm = src.match(/\\.skip\\(\\s*(\\d+)/); if (sm) qi.skip = parseInt(sm[1]);"
+            "   } catch (e) {} }"
+            "   const safe = (fn) => { try { return fn(); } catch (e) { return null; } };"
+            "   out.meta = { server: safe(() => db.getMongo()._uri),"
+            "     db: safe(() => db.getName()),"
+            "     queryInfo: globalThis.__robo.queryInfo, aggrInfo: globalThis.__robo.aggrInfo };"
+            "   let pl;"
+            "   try { pl = EJSON.stringify(out, { relaxed: false }); }"
+            "   catch (e) { pl = EJSON.stringify({ ok: false, error: { name: \"BSONError\","
+            "     message: \"Result is not serializable: \" + e.message }, meta: out.meta },"
+            "     { relaxed: false }); }"
+            "   print(\"\\n__RB_\" + id + \"__\" + pl + \"__RE_\" + id + \"__\");"
+            " };";
+    }
+
+    MongoshSession::~MongoshSession()
+    {
+        shutdown();
+    }
+
+    void MongoshSession::shutdown()
+    {
+        if (_process) {
+            _process->kill();
+            _process->waitForFinished(3000);
+            _process.reset();
+        }
+    }
+
+    void MongoshSession::interrupt()
+    {
+        if (_process)
+            _process->kill();
+    }
+
+    bool MongoshSession::ensureStarted(const QStringList &connArgs, std::string *error)
+    {
+        if (_process && _process->state() == QProcess::Running && _connArgs == connArgs)
+            return true;
+
+        shutdown();
+
+        const QString binary = MongoshExecutor::findMongoshBinary();
+        if (binary.isEmpty()) {
+            *error = "mongosh binary not found. It should be located next to the Robo 3T "
+                     "executable (bundled by the installer). For development builds set "
+                     "ROBO_MONGOSH_PATH or add mongosh to PATH.";
+            return false;
+        }
+
+        QStringList args = connArgs;
+        args << "--quiet" << "--norc";
+
+        _process.reset(new QProcess);
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("NO_COLOR", "1");
+        _process->setProcessEnvironment(env);
+
+        logInvocation(binary, redactArgs(args));
+        _process->start(binary, args);
+
+        if (!_process->waitForStarted(15000)) {
+            *error = "Failed to start mongosh: " + _process->errorString().toStdString();
+            _process.reset();
+            return false;
+        }
+
+        _process->write(kSessionPrelude);
+        _process->write("\n");
+        _connArgs = connArgs;
+        return true;
+    }
+
+    MongoshSession::RunOutcome MongoshSession::run(const QStringList &connArgs,
+                                                   const std::string &script,
+                                                   const std::string &dbName,
+                                                   bool isHelper, int timeoutSec)
+    {
+        RunOutcome outcome;
+
+        std::string startError;
+        if (!ensureStarted(connArgs, &startError)) {
+            outcome.sessionError = true;
+            outcome.sessionErrorMessage = startError;
+            return outcome;
+        }
+
+        const std::string id = std::to_string(++_sequence);
+        const std::string beginMarker = "__RB_" + id + "__";
+        const std::string endMarker = "__RE_" + id + "__";
+
+        // Helper lines (use/show/...) are REPL sugar and must be sent raw;
+        // the follow-up __roboRun marks completion and reports metadata.
+        if (isHelper) {
+            _process->write(script.c_str());
+            _process->write("\n");
+        }
+        const std::string source = isHelper ? std::string("null") : script;
+        std::string command = "__roboRun(\"" + id + "\", \"" + mongo::str::escape(source) + "\"";
+        if (!dbName.empty())
+            command += ", \"" + mongo::str::escape(dbName) + "\"";
+        command += ")\n";
+        writeDebug("RUN " + QString::fromStdString(
+            command.size() > 300 ? command.substr(0, 300) + "..." : command));
+        _process->write(command.c_str());
+
+        // Read until the end marker, the deadline, or process death
+        const int effectiveSec = timeoutSec > 0 ? timeoutSec : 120;
+        QElapsedTimer timer;
+        timer.start();
+        std::string buffer;
+        while (buffer.find(endMarker) == std::string::npos) {
+            if (timer.elapsed() > effectiveSec * 1000LL) {
+                outcome.timedOut = true;
+                shutdown();
+                return outcome;
+            }
+            _process->waitForReadyRead(200);
+            buffer += _process->readAllStandardOutput().toStdString();
+            if (_process->state() != QProcess::Running &&
+                buffer.find(endMarker) == std::string::npos) {
+                buffer += _process->readAllStandardOutput().toStdString();
+                if (buffer.find(endMarker) != std::string::npos)
+                    break;
+                outcome.sessionError = true;
+                outcome.sessionErrorMessage =
+                    "mongosh session ended unexpectedly. " +
+                    _process->readAllStandardError().toStdString();
+                shutdown();
+                return outcome;
+            }
+        }
+
+        const size_t beginPos = buffer.find(beginMarker);
+        const size_t endPos = buffer.find(endMarker);
+        if (beginPos == std::string::npos || endPos <= beginPos) {
+            outcome.sessionError = true;
+            outcome.sessionErrorMessage = "Malformed mongosh session response.";
+            shutdown();
+            return outcome;
+        }
+
+        // Text printed before the envelope (user print()s, helper output),
+        // with blank lines collapsed
+        std::string pre = buffer.substr(0, beginPos);
+        while (!pre.empty() && (pre.back() == '\n' || pre.back() == '\r'))
+            pre.pop_back();
+        outcome.textOutput = pre;
+
+        try {
+            const std::string payload =
+                buffer.substr(beginPos + beginMarker.size(),
+                              endPos - beginPos - beginMarker.size());
+            mongo::BSONObj envelope = mongo::fromjson(payload);
+
+            outcome.ok = envelope.getField("ok").trueValue();
+            if (!outcome.ok) {
+                mongo::BSONObj err = envelope.getObjectField("error");
+                outcome.errorName = err.getStringField("name");
+                outcome.errorMessage = err.getStringField("message");
+            }
+
+            mongo::BSONElement result = envelope.getField("result");
+            if (envelope.getField("hasResult").trueValue() && !result.isNull()) {
+                if (result.type() == mongo::Object || result.type() == mongo::Array) {
+                    outcome.hasResult = true;
+                    outcome.result = result.Obj();
+                } else if (!result.eoo()) {
+                    outcome.scalarResult = true;
+                    outcome.scalarText = result.toString(false);
+                }
+            }
+
+            mongo::BSONElement meta = envelope.getField("meta");
+            if (meta.type() == mongo::Object) {
+                outcome.meta = meta.Obj();
+                outcome.hasMeta = true;
+            }
+        } catch (const std::exception &e) {
+            outcome.sessionError = true;
+            outcome.sessionErrorMessage =
+                std::string("Failed to parse mongosh session response: ") + e.what();
+        }
+
+        return outcome;
     }
 }

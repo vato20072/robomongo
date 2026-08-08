@@ -14,88 +14,6 @@
 
 namespace
 {
-    const char *kMetaMarker = "__ROBO_META__";
-
-    /**
-     * Prelude evaluated before the user script in the same mongosh session.
-     * - Patches Collection.find/aggregate to capture query metadata
-     *   (collection, filter, projection, limit/skip) for Robo's paging UI.
-     * - On process exit writes a __ROBO_META__ EJSON line to stderr with the
-     *   captured metadata and the final db/server (stdout stays reserved for
-     *   the --json result of the user script).
-     */
-    const char *kPrelude = R"ROBO(
-(() => {
-  globalThis.__robo = { queryInfo: null, aggrInfo: null };
-  try {
-    const sampleColl = db.getCollection('__robo_probe__');
-    const collProto = Object.getPrototypeOf(sampleColl);
-
-    const origFind = collProto.find;
-    collProto.find = function (filter, projection, options) {
-      const cursor = origFind.call(this, filter, projection, options);
-      try {
-        globalThis.__robo.queryInfo = {
-          db: (this._database && this._database.getName) ? this._database.getName() : db.getName(),
-          collection: this.getName ? this.getName() : String(this._name),
-          query: filter || {},
-          fields: projection || {},
-          limit: 0, skip: 0, batchSize: 0
-        };
-        const curProto = Object.getPrototypeOf(cursor);
-        if (!curProto.__roboPatched) {
-          curProto.__roboPatched = true;
-          for (const m of ['limit', 'skip', 'batchSize']) {
-            const orig = curProto[m];
-            if (typeof orig === 'function') {
-              curProto[m] = function (v) {
-                if (globalThis.__robo.queryInfo) globalThis.__robo.queryInfo[m] = v;
-                return orig.apply(this, arguments);
-              };
-            }
-          }
-        }
-      } catch (e) { /* metadata is best-effort */ }
-      return cursor;
-    };
-
-    const origAggregate = collProto.aggregate;
-    collProto.aggregate = function (pipeline, options) {
-      try {
-        globalThis.__robo.aggrInfo = {
-          collection: this.getName ? this.getName() : String(this._name),
-          pipeline: pipeline || [],
-          options: options || {}
-        };
-      } catch (e) { /* best-effort */ }
-      return origAggregate.apply(this, arguments);
-    };
-  } catch (e) { /* no db (--nodb) or unexpected shell API - continue */ }
-
-  process.on('exit', () => {
-    try {
-      const safe = (fn) => { try { return fn(); } catch (e) { return null; } };
-      const meta = {
-        server: safe(() => db.getMongo()._uri) || safe(() => db.getMongo().toString()),
-        db: safe(() => db.getName()),
-        queryInfo: globalThis.__robo.queryInfo,
-        aggrInfo: globalThis.__robo.aggrInfo
-      };
-      process.stderr.write('\n__ROBO_META__' + EJSON.stringify(meta, { relaxed: false }) + '\n');
-    } catch (e) { /* stdout result already delivered */ }
-  });
-})();
-)ROBO";
-}
-
-namespace
-{
-    // Maximum documents materialized from a cursor in the shell result pane
-    // (mongosh --json cannot serialize a live cursor, and toArray() on a huge
-    // collection would exhaust memory). Robo's table view uses its own paged
-    // query path; this only bounds ad-hoc find()s typed in a shell tab.
-    constexpr int kShellCursorLimit = 1000;
-
     /** True if the script is a mongosh REPL helper (not plain JavaScript) */
     bool isShellHelper(const std::string &script)
     {
@@ -136,35 +54,6 @@ namespace
         return out;
     }
 
-    /**
-     * Wraps a user shell script so mongosh --json can serialize its result:
-     * evaluates it, awaits promises (async driver ops), and materializes
-     * cursors into a bounded array of documents. Shell helpers (use/show/...)
-     * are passed through unchanged since they are not valid JavaScript.
-     */
-    std::string wrapUserScript(const std::string &script)
-    {
-        if (isShellHelper(script))
-            return script;
-
-        // The script is embedded as a JS string and run with eval() so the
-        // completion value of its last expression is captured. eval() does
-        // not get mongosh's implicit-await transform, so we await explicitly.
-        std::ostringstream ss;
-        ss << "(async () => {"
-              "  let __robo_v = eval(\"" << mongo::str::escape(script) << "\");"
-              "  if (__robo_v && typeof __robo_v.then === 'function') __robo_v = await __robo_v;"
-              "  if (__robo_v && typeof __robo_v.toArray === 'function'"
-              "      && typeof __robo_v.hasNext === 'function') {"
-              "    const __robo_docs = [];"
-              "    while (__robo_docs.length < " << kShellCursorLimit
-           << "        && await __robo_v.hasNext()) __robo_docs.push(await __robo_v.next());"
-              "    __robo_v = __robo_docs;"
-              "  }"
-              "  return __robo_v;"
-              "})()";
-        return ss.str();
-    }
 }
 
 namespace Robomongo
@@ -201,28 +90,18 @@ namespace Robomongo
         _initialized = true;
     }
 
-    ScriptEngine::ExecMeta ScriptEngine::extractMeta(const std::string &stderrText,
+    QStringList ScriptEngine::sessionArgs() const
+    {
+        // Fixed initial db: per-run db switching keeps the session reusable
+        return MongoshExecutor::connectionArgs(_connection, _serverAddr, std::string());
+    }
+
+    ScriptEngine::ExecMeta ScriptEngine::extractMeta(const mongo::BSONObj &metaObj,
                                                      AggrInfo requestAggrInfo)
     {
         ExecMeta meta;
 
-        const size_t markerPos = stderrText.find(kMetaMarker);
-        if (markerPos == std::string::npos) {
-            meta.cleanedStderr = stderrText;
-            return meta;
-        }
-
-        const size_t jsonStart = markerPos + std::strlen(kMetaMarker);
-        size_t jsonEnd = stderrText.find('\n', jsonStart);
-        if (jsonEnd == std::string::npos)
-            jsonEnd = stderrText.size();
-
-        meta.cleanedStderr = stderrText.substr(0, markerPos) + stderrText.substr(jsonEnd);
-
         try {
-            mongo::BSONObj metaObj =
-                mongo::fromjson(stderrText.substr(jsonStart, jsonEnd - jsonStart));
-
             meta.server = metaObj.getStringField("server");
             meta.serverValid = !meta.server.empty();
             meta.database = metaObj.getStringField("db");
@@ -275,50 +154,50 @@ namespace Robomongo
         if (!dbName.empty())
             _currentDbName = dbName;
 
-        const QStringList connArgs =
-            MongoshExecutor::connectionArgs(_connection, _serverAddr, _currentDbName);
-
         QElapsedTimer timer;
         timer.start();
 
-        MongoshExecutor::EvalResult evalResult =
-            _executor.eval(connArgs, {kPrelude, wrapUserScript(originalScript)}, _timeoutSec);
+        MongoshSession::RunOutcome outcome = _session.run(
+            sessionArgs(), originalScript, _currentDbName,
+            isShellHelper(originalScript), _timeoutSec);
 
         const qint64 elapsed = timer.elapsed();
 
-        if (evalResult.failedToStart)
-            return MongoShellExecResult(true, evalResult.errorOutput);
+        if (outcome.sessionError)
+            return MongoShellExecResult(true, outcome.sessionErrorMessage);
 
-        if (evalResult.timedOut)
+        if (outcome.timedOut)
             return MongoShellExecResult(true, "Script execution timed out.", true);
 
-        ExecMeta meta = extractMeta(evalResult.errorOutput, aggrInfo);
+        ExecMeta meta = outcome.hasMeta ? extractMeta(outcome.meta, aggrInfo) : ExecMeta();
 
         // Track db switches (`use otherDb`) done inside the script
         if (meta.databaseValid)
             _currentDbName = meta.database;
 
-        const MongoshEvalOutput &out = evalResult.output;
-
-        if (out.isError) {
-            std::string message = out.errorMessage;
-            if (!out.text.empty())
-                message = out.text + "\n" + message;
+        if (!outcome.ok) {
+            std::string message = outcome.errorName.empty()
+                ? outcome.errorMessage
+                : outcome.errorName + ": " + outcome.errorMessage;
+            if (!outcome.textOutput.empty())
+                message = outcome.textOutput + "\n" + message;
             return MongoShellExecResult(true, message);
         }
 
-        // Surface remaining stderr (connection warnings etc.) into output
-        std::string textOutput = out.text;
-        if (!meta.cleanedStderr.empty() && evalResult.exitCode != 0)
-            textOutput += meta.cleanedStderr;
+        std::string textOutput = outcome.textOutput;
+        if (outcome.scalarResult) {
+            if (!textOutput.empty())
+                textOutput += "\n";
+            textOutput += outcome.scalarText;
+        }
 
         // Build documents from the structured result
         std::vector<MongoDocumentPtr> documents;
         std::string type;
-        if (out.hasResult) {
-            if (out.result.isArray()) {
+        if (outcome.hasResult) {
+            if (outcome.result.isArray()) {
                 type = "cursor";
-                mongo::BSONObjIterator it(out.result);
+                mongo::BSONObjIterator it(outcome.result);
                 while (it.more()) {
                     mongo::BSONElement e = it.next();
                     if (e.type() == mongo::Object || e.type() == mongo::Array)
@@ -328,7 +207,7 @@ namespace Robomongo
                 }
             } else {
                 type = meta.hasQueryInfo ? "cursor" : "object";
-                documents.push_back(MongoDocument::fromBsonObj(out.result));
+                documents.push_back(MongoDocument::fromBsonObj(outcome.result));
             }
         }
 
@@ -356,29 +235,24 @@ namespace Robomongo
         if (!_initialized)
             throw std::runtime_error("Shell engine is not initialized.");
 
-        const QStringList connArgs = MongoshExecutor::connectionArgs(
-            _connection, _serverAddr, dbName.empty() ? _currentDbName : dbName);
+        MongoshSession::RunOutcome outcome = _session.run(
+            sessionArgs(), script, dbName.empty() ? _currentDbName : dbName,
+            false /*isHelper*/, _timeoutSec);
 
-        MongoshExecutor::EvalResult res = _executor.eval(connArgs, {script}, _timeoutSec);
-
-        if (res.failedToStart)
-            throw std::runtime_error(res.errorOutput);
-        if (res.timedOut)
+        if (outcome.sessionError)
+            throw std::runtime_error(outcome.sessionErrorMessage);
+        if (outcome.timedOut)
             throw std::runtime_error("Operation timed out.");
-        if (res.output.isError)
-            throw std::runtime_error(res.output.errorMessage);
-        if (!res.output.hasResult && res.exitCode != 0) {
-            std::string message = res.errorOutput.empty() ? res.output.text : res.errorOutput;
-            // Strip the __ROBO_META__ line if the prelude was not used
-            throw std::runtime_error(message.empty() ? "mongosh evaluation failed" : message);
-        }
+        if (!outcome.ok)
+            throw std::runtime_error(outcome.errorMessage.empty() ? "mongosh evaluation failed"
+                                                                  : outcome.errorMessage);
 
-        return res.output.result;
+        return outcome.result;
     }
 
     void ScriptEngine::interrupt()
     {
-        _executor.interrupt();
+        _session.interrupt();
     }
 
     void ScriptEngine::use(const std::string &dbName)
@@ -424,13 +298,12 @@ namespace Robomongo
 
         if (mode == AutocompleteAll) {
             if (!_collectionCacheValid && _initialized) {
-                const QStringList connArgs =
-                    MongoshExecutor::connectionArgs(_connection, _serverAddr, _currentDbName);
-                MongoshExecutor::EvalResult res = _executor.eval(
-                    connArgs, {"db.getCollectionNames()"}, 5);
-                if (res.output.hasResult && res.output.result.isArray()) {
+                MongoshSession::RunOutcome res = _session.run(
+                    sessionArgs(), "db.getCollectionNames()", _currentDbName,
+                    false /*isHelper*/, 5);
+                if (res.ok && res.hasResult && res.result.isArray()) {
                     _cachedCollectionNames.clear();
-                    mongo::BSONObjIterator it(res.output.result);
+                    mongo::BSONObjIterator it(res.result);
                     while (it.more()) {
                         mongo::BSONElement e = it.next();
                         if (e.type() == mongo::String)
