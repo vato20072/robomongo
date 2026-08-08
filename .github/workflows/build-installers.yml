@@ -60,69 +60,75 @@ jobs:
           path: build/release/package/*.dmg
           if-no-files-found: error
 
-  windows:
-    runs-on: windows-2022
-    timeout-minutes: 90
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # ------------------------------------------------------------------
+  # Windows job DISABLED for now (decision 2026-08-08): it fails during
+  # CMake configure and Windows installers are not a current priority.
+  # The full configure log of the last attempt is the 'windows-build-log'
+  # artifact of run 31259457689. Uncomment to resume work.
+  # ------------------------------------------------------------------
+#  windows:
+#    runs-on: windows-2022
+#    timeout-minutes: 90
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v4
 
-      - name: Install Qt 5.15.2
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "5.15.2"
-          arch: win64_msvc2019_64
-          cache: true
+#      - name: Install Qt 5.15.2
+#        uses: jurplel/install-qt-action@v4
+#        with:
+#          version: "5.15.2"
+#          arch: win64_msvc2019_64
+#          cache: true
 
-      - name: Install OpenSSL and boost
-        shell: pwsh
-        run: |
-          choco install openssl --no-progress -y
-          choco install boost-msvc-14.3 --no-progress -y
+#      - name: Install OpenSSL and boost
+#        shell: pwsh
+#        run: |
+#          choco install openssl --no-progress -y
+#          choco install boost-msvc-14.3 --no-progress -y
 
-      - name: Configure, build and package
-        shell: cmd
-        run: |
-          set "ROBOMONGO_CMAKE_PREFIX_PATH=%QT_ROOT_DIR%;C:\Program Files\OpenSSL-Win64"
-          set "ROBO_CMAKE_GENERATOR=Visual Studio 17 2022"
-          set "ROBO_CMAKE_PLATFORM=x64"
-          (call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" ^
-            && where cl ^
-            && echo PREFIX=%ROBOMONGO_CMAKE_PREFIX_PATH% ^
-            && call bin\configure.bat ^
-            && call bin\build.bat ^
-            && call bin\pack.bat) > robo-build.log 2>&1
-          set BUILD_RC=%ERRORLEVEL%
-          powershell -Command "Get-Content robo-build.log -Tail 60"
-          exit /b %BUILD_RC%
+#      - name: Configure, build and package
+#        shell: cmd
+#        run: |
+#          set "ROBOMONGO_CMAKE_PREFIX_PATH=%QT_ROOT_DIR%;C:\Program Files\OpenSSL-Win64"
+#          set "ROBO_CMAKE_GENERATOR=Visual Studio 17 2022"
+#          set "ROBO_CMAKE_PLATFORM=x64"
+#          (call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" ^
+#            && where cl ^
+#            && echo PREFIX=%ROBOMONGO_CMAKE_PREFIX_PATH% ^
+#            && call bin\configure.bat ^
+#            && call bin\build.bat ^
+#            && call bin\pack.bat) > robo-build.log 2>&1
+#          set BUILD_RC=%ERRORLEVEL%
+#          powershell -Command "Get-Content robo-build.log -Tail 60"
+#          exit /b %BUILD_RC%
 
-      - name: Publish failure log tail to summary
-        if: failure()
-        shell: pwsh
-        # Step summaries are visible without signing in, unlike raw logs
-        run: |
-          if (Test-Path 'robo-build.log') {
-            Add-Content $env:GITHUB_STEP_SUMMARY '## Tail of robo-build.log'
-            Add-Content $env:GITHUB_STEP_SUMMARY '~~~'
-            Get-Content robo-build.log -Tail 200 | Add-Content $env:GITHUB_STEP_SUMMARY
-            Add-Content $env:GITHUB_STEP_SUMMARY '~~~'
-          } else {
-            Add-Content $env:GITHUB_STEP_SUMMARY 'robo-build.log was not created'
-          }
+#      - name: Publish failure log tail to summary
+#        if: failure()
+#        shell: pwsh
+#        # Step summaries are visible without signing in, unlike raw logs
+#        run: |
+#          if (Test-Path 'robo-build.log') {
+#            Add-Content $env:GITHUB_STEP_SUMMARY '## Tail of robo-build.log'
+#            Add-Content $env:GITHUB_STEP_SUMMARY '~~~'
+#            Get-Content robo-build.log -Tail 200 | Add-Content $env:GITHUB_STEP_SUMMARY
+#            Add-Content $env:GITHUB_STEP_SUMMARY '~~~'
+#          } else {
+#            Add-Content $env:GITHUB_STEP_SUMMARY 'robo-build.log was not created'
+#          }
 
-      - name: Upload build log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build-log
-          path: robo-build.log
-          if-no-files-found: ignore
+#      - name: Upload build log
+#        if: failure()
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: windows-build-log
+#          path: robo-build.log
+#          if-no-files-found: ignore
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: robo3t-windows-x86_64-mongosh-${{ env.ROBO_MONGOSH_VERSION }}
-          path: |
-            build/Release/package/*.exe
-            build/Release/package/*.zip
-          if-no-files-found: error
+#      - name: Upload installer
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: robo3t-windows-x86_64-mongosh-${{ env.ROBO_MONGOSH_VERSION }}
+#          path: |
+#            build/Release/package/*.exe
+#            build/Release/package/*.zip
+#          if-no-files-found: error
