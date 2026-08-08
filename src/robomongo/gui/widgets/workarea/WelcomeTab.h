@@ -1,6 +1,6 @@
 #pragma once
 
-#ifndef __linux__  // ---------------------- Windows, macOS impl. --------------------------// 
+#ifdef ROBO_WEBENGINE  // ------------------ QtWebEngine impl. (Windows, macOS) -----------//
 
 #include <QWidget>
 #include <QWebEnginePage>

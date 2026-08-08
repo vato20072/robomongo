@@ -144,10 +144,11 @@ set(SOURCES
 # Robomongo target
 add_executable(robomongo MACOSX_BUNDLE WIN32 app/main.cpp ${SOURCES})
 
-# Disable WebEngineWidgets for Linux
-SET(WebEngineWidgets "Qt5::WebEngineWidgets") 
-if(SYSTEM_LINUX)
-   SET(WebEngineWidgets)  
+# WebEngine-based Welcome tab (Windows/macOS when QtWebEngine is available)
+SET(WebEngineWidgets)
+if(ROBO_WEBENGINE)
+   SET(WebEngineWidgets "Qt5::WebEngineWidgets")
+   target_compile_definitions(robomongo PRIVATE ROBO_WEBENGINE)
 endif()
  
 target_link_libraries(robomongo

@@ -2,6 +2,10 @@
 
 CMakeLists.txt.user*
 
+# Devbox / Nix
+.devbox/
+.venv/
+
 .sconsign.dblite
 .sconf_temp
 .scons

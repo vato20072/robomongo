@@ -1,6 +1,6 @@
 #include "robomongo/gui/widgets/workarea/WelcomeTab.h"
 
-#ifndef __linux__  // --------------------- Windows, macOS impl --------------------------// 
+#ifdef ROBO_WEBENGINE  // ----------------- QtWebEngine impl. (Windows, macOS) ----------//
 
 #include <QtWebEngineWidgets>
 #include <QDesktopServices>

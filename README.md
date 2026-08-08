@@ -94,6 +94,23 @@ Note: This sections is for Robo 3T and it directly depends on what MongoDB suppp
 | Windows 64-bit 7       |  Mac OS X 10.14 (Mojave)      |   |
 
 
+Development Environment
+=======================
+
+This fork ships a reproducible [Devbox](https://www.jetify.com/devbox)-based
+development environment that pins the whole toolchain (CMake, Qt 5, OpenSSL 1.1,
+SCons, Python):
+
+```sh
+devbox shell          # enter the pinned environment
+devbox run shell-clone && devbox run shell-build   # build MongoDB shell fork (once)
+devbox run configure && devbox run build && devbox run run
+```
+
+See [docs/DevboxEnvironment.md](docs/DevboxEnvironment.md) for details, and
+[docs/Mongo6Modernization.md](docs/Mongo6Modernization.md) for the analysis and
+roadmap of moving from the embedded MongoDB 4.2 shell to `mongosh` (MongoDB 6.x+).
+
 Contribute!
 ===========
 
