@@ -118,15 +118,33 @@ jobs:
       - name: Build Robo 3T Shell
         if: steps.cache-shell.outputs.cache-hit != 'true'
         working-directory: robo-shell
-        run: bin/build
+        shell: bash
+        # Direct scons invocation: the fork's bin/build mis-quotes CCFLAGS
+        # (word-splits -Wno-unused-function into a bogus scons option)
+        run: |
+          scons mongo --ssl -j"$(sysctl -n hw.ncpu)" \
+            "CCFLAGS=-mmacosx-version-min=10.13 -Wno-unused-function" \
+            "LINKFLAGS=-mmacosx-version-min=10.13" \
+            --disable-minimum-compiler-version-enforcement \
+            --disable-warnings-as-errors 2>&1 | tee scons.log
 
       - name: Configure, build and package Robo 3T
         working-directory: robo
+        shell: bash
         run: |
           export ROBOMONGO_CMAKE_PREFIX_PATH="$QT_ROOT_DIR;$GITHUB_WORKSPACE/robo-shell;$GITHUB_WORKSPACE/openssl-${OPENSSL_VERSION}"
-          bin/configure
-          bin/build
-          bin/pack
+          { bin/configure && bin/build && bin/pack; } 2>&1 | tee robo-build.log
+
+      - name: Publish failure log tails to summary
+        if: failure()
+        shell: bash
+        # Step summaries are visible without signing in, unlike raw logs
+        run: |
+          for f in robo-shell/scons.log robo/robo-build.log; do
+            if [ -f "$f" ]; then
+              { echo "## Tail of $f"; echo '```'; tail -n 150 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: Upload dmg
         uses: actions/upload-artifact@v4
@@ -219,9 +237,15 @@ jobs:
         if: steps.cache-shell.outputs.cache-hit != 'true'
         shell: cmd
         working-directory: robo-shell
+        # Mirrors the fork's bin\build.bat scons invocation, with output
+        # captured for the failure summary
         run: |
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=14.16
-          call bin\build.bat
+          scons mongo.exe -j%NUMBER_OF_PROCESSORS% --link-model=object --disable-minimum-compiler-version-enforcement --disable-warnings-as-errors > scons.log 2>&1
+          if errorlevel 1 (
+            powershell -Command "Get-Content scons.log -Tail 60"
+            exit /b 1
+          )
 
       - name: Configure, build and package Robo 3T
         shell: cmd
@@ -232,11 +256,25 @@ jobs:
           set "ROBO_CMAKE_GENERATOR=Visual Studio 16 2019"
           set "ROBO_CMAKE_PLATFORM=x64"
           set "ROBO_CMAKE_TOOLSET=v141"
-          call bin\configure.bat
-          if errorlevel 1 exit /b 1
-          call bin\build.bat
-          if errorlevel 1 exit /b 1
-          call bin\pack.bat
+          (call bin\configure.bat && call bin\build.bat && call bin\pack.bat) > robo-build.log 2>&1
+          if errorlevel 1 (
+            powershell -Command "Get-Content robo-build.log -Tail 60"
+            exit /b 1
+          )
+
+      - name: Publish failure log tails to summary
+        if: failure()
+        shell: pwsh
+        # Step summaries are visible without signing in, unlike raw logs
+        run: |
+          foreach ($f in @('robo-shell/scons.log', 'robo/robo-build.log')) {
+            if (Test-Path $f) {
+              Add-Content $env:GITHUB_STEP_SUMMARY "## Tail of $f"
+              Add-Content $env:GITHUB_STEP_SUMMARY '~~~'
+              Get-Content $f -Tail 150 | Add-Content $env:GITHUB_STEP_SUMMARY
+              Add-Content $env:GITHUB_STEP_SUMMARY '~~~'
+            }
+          }
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
