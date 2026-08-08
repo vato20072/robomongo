@@ -2,16 +2,22 @@
 
 #include <QObject>
 #include <QMutex>
-#include <mongo/scripting/engine.h>
-//#include <third_party/js-1.7/jsparse.h>
+#include <QStringList>
 
 #include "robomongo/core/domain/MongoShellResult.h"
+#include "robomongo/core/engine/MongoshExecutor.h"
 #include "robomongo/core/Enums.h"
 
 namespace Robomongo
 {
     class ConnectionSettings;
 
+    /**
+     * Executes user scripts through the bundled mongosh (sidecar process
+     * per evaluation) instead of the historical embedded MongoDB 4.2
+     * shell. Public interface preserved from the original engine so
+     * MongoWorker/MongoShell stay unchanged.
+     */
     class ScriptEngine : public QObject
     {
         Q_OBJECT
@@ -37,25 +43,32 @@ namespace Robomongo
         void changeTimeout(int newTimeout) { _timeoutSec = newTimeout; }
 
     private:
+        /** Parses the __ROBO_META__ line out of mongosh stderr */
+        struct ExecMeta
+        {
+            std::string server;
+            std::string database;
+            bool serverValid = false;
+            bool databaseValid = false;
+            MongoQueryInfo queryInfo;
+            bool hasQueryInfo = false;
+            AggrInfo aggrInfo;
+            std::string cleanedStderr;
+        };
+        ExecMeta extractMeta(const std::string &stderrText, AggrInfo requestAggrInfo);
+
         ConnectionSettings *_connection;
-
-        MongoShellResult prepareResult(const std::string &type, const std::string &output, 
-                                       const std::vector<MongoDocumentPtr> &objects, qint64 elapsedms,
-                                       const std::string &statement, AggrInfo aggrInfo = AggrInfo());
-
-        MongoShellExecResult prepareExecResult(
-            const std::vector<MongoShellResult> &results, bool timeoutReached = false);
-
-        std::string loadFile(const QString &path, bool throwOnError);
-        std::string getString(const char *fieldName);
-        bool statementize(
-            const std::string &script, std::vector<std::string> &outVec, std::string &outError);
+        MongoshExecutor _executor;
 
         int _timeoutSec;
-        mongo::ScriptEngine *_engine;
-        std::unique_ptr<mongo::Scope> _scope; // MozJSProxyScope
+        std::string _serverAddr;     // SSH tunnel / replica-member override
+        std::string _currentDbName;
+        int _batchSize = 50;
         bool _failedScope = false;
+        bool _initialized = false;
         QMutex _mutex;
-        bool _initialized;
+
+        QStringList _cachedCollectionNames;
+        bool _collectionCacheValid = false;
     };
 }
