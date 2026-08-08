@@ -123,6 +123,7 @@ jobs:
         # (word-splits -Wno-unused-function into a bogus scons option)
         run: |
           scons mongo --ssl -j"$(sysctl -n hw.ncpu)" \
+            MONGO_VERSION=4.2.0 \
             "CCFLAGS=-mmacosx-version-min=10.13 -Wno-unused-function" \
             "LINKFLAGS=-mmacosx-version-min=10.13" \
             --disable-minimum-compiler-version-enforcement \
@@ -241,7 +242,7 @@ jobs:
         # captured for the failure summary
         run: |
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=14.16
-          scons mongo.exe -j%NUMBER_OF_PROCESSORS% --link-model=object --disable-minimum-compiler-version-enforcement --disable-warnings-as-errors > scons.log 2>&1
+          scons mongo.exe -j%NUMBER_OF_PROCESSORS% MONGO_VERSION=4.2.0 --link-model=object --disable-minimum-compiler-version-enforcement --disable-warnings-as-errors > scons.log 2>&1
           if errorlevel 1 (
             powershell -Command "Get-Content scons.log -Tail 60"
             exit /b 1

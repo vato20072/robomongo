@@ -32,7 +32,7 @@
     "init_hook": ["source ./devbox.d/init.sh"],
     "scripts": {
       "shell-clone": "git clone --branch roboshell-v4.2 https://github.com/paralect/robomongo-shell.git \"$ROBOSHELL_DIR\"",
-      "shell-build": "cd \"$ROBOSHELL_DIR\" && bin/build",
+      "shell-build": "bash devbox.d/build-shell.sh",
       "configure": "bin/configure",
       "build": "bin/build",
       "run": "bin/run",
