@@ -166,11 +166,19 @@ elseif(SYSTEM_WINDOWS)
     include(InstallRequiredSystemLibraries)
 endif()
 
-# Bundle mongosh (fetched by RobomongoMongosh.cmake) next to the executable,
-# so installers/packages ship it - the executor for MongoDB 6.x+ servers.
+# Bundle mongosh (fetched by RobomongoMongosh.cmake) - the executor for
+# MongoDB 6.x+ servers. On macOS it must live in Contents/Helpers, NOT
+# Contents/MacOS: LaunchServices treats any executable spawned from an app
+# bundle's MacOS directory as the app itself "launching", which makes a
+# Dock icon bounce for every mongosh evaluation.
 if(ROBO_BUNDLE_MONGOSH AND MONGOSH_DIST_BIN_DIR)
+    if(SYSTEM_MACOSX)
+        set(mongosh_dir ${contents_path}/Helpers)
+    else()
+        set(mongosh_dir ${bin_dir})
+    endif()
     install(
         DIRECTORY   "${MONGOSH_DIST_BIN_DIR}/"
-        DESTINATION ${bin_dir}
+        DESTINATION ${mongosh_dir}
         USE_SOURCE_PERMISSIONS)
 endif()

@@ -22,7 +22,18 @@ namespace Robomongo
         const QString binaryName = "mongosh";
 #endif
 
-        // 1. Bundled: next to the application executable
+#ifdef Q_OS_MAC
+        // 1. Bundled: Contents/Helpers (outside Contents/MacOS, so
+        // LaunchServices does not treat each spawn as an app launch -
+        // that would bounce a Dock icon per evaluation)
+        const QString helpers = QDir(QCoreApplication::applicationDirPath())
+                                    .filePath("../Helpers/" + binaryName);
+        if (QFileInfo::exists(helpers))
+            return QFileInfo(helpers).canonicalFilePath();
+#endif
+
+        // Bundled next to the application executable (Windows/Linux;
+        // also the historical macOS location)
         const QString bundled =
             QDir(QCoreApplication::applicationDirPath()).filePath(binaryName);
         if (QFileInfo::exists(bundled))
